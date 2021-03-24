@@ -29,12 +29,86 @@ void SineOscAudioModule::createParameters()
   // phasor-based implementation is better for freq modulation anyway - for the time being, just
   // don't modulate detune
   
-  // maybe  make a start-phase parameter
+  // maybe  make a start-phase parameter - or better: just a phase parameter to allow also for
+  // phase-modulation
 }
 
+//-------------------------------------------------------------------------------------------------
 
+SineOscAudioModulePoly::SineOscAudioModulePoly(CriticalSection* lockToUse,
+  MetaParameterManager* metaManagerToUse, ModulationManager* modManagerToUse)
+  : AudioModulePoly(lockToUse, metaManagerToUse, modManagerToUse) 
+{
+  ScopedLock scopedLock(*lock);
+  setModuleTypeName("SineOscillatorPoly");  // change to SineOscillator later
+  createParameters();
+}
 
+void SineOscAudioModulePoly::createParameters()
+{
+  ScopedLock scopedLock(*lock);
 
+  typedef SineOscAudioModulePoly SOM;
+  typedef ModulatableParameterPoly Param;
+  Param* p;
+
+  p = new Param("Frequency", 20.0, 20000.0, 1000.0, Parameter::EXPONENTIAL);
+  addObservedParameter(p);
+  p->setValueChangeCallbackPoly([this](double v, int i) { setFrequency(v, i); });
+  // later we want a sort of exponential mapping but one that allows for zero values - maybe
+  // something based on sinh that is matched to the actual desired exp-shape at the max-value
+  // and at the mid-value (or some other selectable value) - or the user prescribes the mid 
+  // value - what about frequencies < 0 - that shoudl reverse the direction of the oscillator
+  // in the sine osc, we may realizes this by swapping y1,y2 (i think)
+
+  p = new Param("Amplitude", -1.0, +1.0, 1.0, Parameter::LINEAR);
+  addObservedParameter(p);
+  p->setValueChangeCallbackPoly([this](double v, int i) { setAmplitude(v, i); });
+
+  /*
+  p = new Param("Detune", -24.0, +24.0, 0.0, Parameter::LINEAR);
+  addObservedParameter(p);
+  p->setValueChangeCallbackPoly([this](double v, int i) { setDetune(v, i); });
+  */
+
+  // now the parameters don't seem to do anything - that's not a good behavior! maybe we need both
+  // monophonic and polyphonic callbacks for the parameters? but nah - that doesn't seem right. 
+  // What we want is:
+  // -when no modulator is connected to a slider, each voice uses the same value for frequency
+ //   and detune and that value is determined by the slider as is
+  //  ...but i think, it shoould already behave this way, if the modulated value is correctly
+  //  initialized from the unmodulated value - maybe there's something wrong with that
+  // -hmm..setFrequency is not called - why? ..ah - because we have no modulator assigned
+  //  ...but that's not all - what about doModulationUpdate? do we need to override this in
+  //  AudioModulePoly to also call do the polyphonic callbacks?
+}
+
+void SineOscAudioModulePoly::allocateVoiceResources() 
+{
+  if(voiceManager)
+    voices.resize(voiceManager->getMaxNumVoices());
+  else
+    voices.resize(1); // monophonic in absence of a voice manager
+}
+
+void SineOscAudioModulePoly::setFrequency(double newFrequency, int voice)
+{
+  jassert(voice < voices.size());
+  double omega = 2*PI*newFrequency / sampleRate;
+  voices[voice].setOmega(omega);
+}
+
+void SineOscAudioModulePoly::setAmplitude(double newAmplitude, int voice)
+{
+  jassert(voice < voices.size());
+  voices[voice].setAmplitude(newAmplitude);
+}
+
+void SineOscAudioModulePoly::setDetune(double newDetune, int voice)
+{
+  jassert(voice < voices.size());
+  RAPT::rsError("Not yet implemented");
+}
 
 
 

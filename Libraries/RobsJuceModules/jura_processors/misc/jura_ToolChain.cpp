@@ -24,12 +24,17 @@ public:
 ToolChain::ToolChain(CriticalSection *lockToUse, 
   MetaParameterManager* metaManagerToUse) 
   : AudioModuleWithMidiIn(lockToUse, metaManagerToUse/*, &modManager*/) // passing modManager causes access violation (not yet constructed)?
-  , modManager(lockToUse), moduleFactory(lockToUse) // maybe pass the metaManagerToUse to this constructor call
+  /*, modManager(lockToUse)*/, moduleFactory(lockToUse) // maybe pass the metaManagerToUse to this constructor call
 {
   ScopedLock scopedLock(*lock);
   setModuleTypeName("ToolChain");
-  modManager.setMetaParameterManager(metaManagerToUse);
-  setModulationManager(&modManager);
+  modManager = new ModulationManagerPoly(lockToUse);
+  modManager->setMetaParameterManager(metaManagerToUse);
+  setModulationManager(modManager);
+  modManager->setVoiceManager(&voiceManager);
+  voiceSignals.resize(2 * voiceManager.getMaxNumVoices()); // maybe move into allocateVoiceResources later
+  voiceManager.setVoiceSignalBuffer(&voiceSignals[0]);
+  createMidiModSources();
   //createDebugModSourcesAndTargets(); // for debugging the mod-system
   populateModuleFactory();
   addEmptySlot();
@@ -40,8 +45,8 @@ ToolChain::~ToolChain()
   ScopedLock scopedLock(*lock);
 
   // Trying to fix the crash of Elan's SeToolChain on destruction:
-  modManager.deRegisterAllTargets();
-  modManager.deRegisterAllSources();
+  modManager->deRegisterAllTargets();
+  modManager->deRegisterAllSources();
   // Yep - that seems to fix it. I think the problem was this: when our modManager member goes out
   // of scope, it calls these 2 functions in its destructor - and in these functions the pointers
   // to the source/target modules are referenced (for nulling their modManager pointer) - but at
@@ -51,6 +56,16 @@ ToolChain::~ToolChain()
 
   for(int i = 0; i < size(modules); i++)
     delete modules[i];
+
+  modManager->setVoiceManager(nullptr); // Dunno if required but better safe than sorry. If the 
+  // voiceManager is destructed before the modManager, we might otherwise have a dangling pointer
+  // in the modManager for a brief moment during destruction. That may be inconsequential but who 
+  // knows... But maybe we can make sure that the modManager is destructed first by declaration 
+  // order -> figure out
+
+  deleteMidiModSources();
+
+  delete modManager;
 }
 
 void ToolChain::addEmptySlot()
@@ -208,20 +223,34 @@ void ToolChain::processBlock(double **inOutBuffer, int numChannels, int numSampl
   if(numChannels != 2) return;
   //ScopedLock scopedLock(*lock); // lock already held by the wrapping plugin
   bool needsSmoothing  = smoothingManager->needsSmoothing();
-  bool needsModulation = modManager.getNumConnections() > 0;
-  if( !needsSmoothing && !needsModulation )
+  bool needsModulation = modManager->getNumConnections() > 0;
+  bool needsVoiceKill  = voiceManager.needsVoiceKillCheck();
+
+  if( !needsSmoothing && !needsModulation && !needsVoiceKill )
     for(size_t i = 0; i < modules.size(); i++)
       modules[i]->processBlock(inOutBuffer, numChannels, numSamples);
   else {
     // we have to iterate through all the samples and for each sample, update all the modulators 
     // and then compute a sample-frame from each non-modulator module:
-    for(int n = 0; n < numSamples; n++) {
-      if(needsSmoothing)   smoothingManager->updateSmoothedValuesNoLock();
-      if(needsModulation)  modManager.applyModulationsNoLock();
+    for(int n = 0; n < numSamples; n++) 
+    {
+      if(needsSmoothing)   
+        smoothingManager->updateSmoothedValuesNoLock();
+      if(needsModulation)  
+        modManager->applyModulationsNoLock();
       for(size_t i = 0; i < modules.size(); i++)
         modules[i]->processStereoFrame(&inOutBuffer[0][n], &inOutBuffer[1][n]);
         // AudioModules that are subclasses of ModulationSource have not overriden this function.
         // That means, they inherit the empty baseclass method and do nothing in this call.
+
+      if(needsVoiceKill)
+      {
+        voiceManager.findAndKillFinishedVoices();
+        needsVoiceKill = voiceManager.needsVoiceKillCheck(); // condition may have changed
+      }
+      // should we also equip rsVoiceManager with a pointer to a mutex and generally lock it and
+      // provide a "NoLock" version of these functions? or is it safe to use without?
+
     }
   }
 
@@ -233,6 +262,7 @@ void ToolChain::setSampleRate(double newSampleRate)
 {
   ScopedLock scopedLock(*lock);
   sampleRate = newSampleRate;
+  voiceManager.setSampleRate(sampleRate);
   for(int i = 0; i < size(modules); i++)
     modules[i]->setSampleRate(sampleRate);
 }
@@ -240,12 +270,47 @@ void ToolChain::setSampleRate(double newSampleRate)
 void ToolChain::handleMidiMessage(MidiMessage message)
 {
   ScopedLock scopedLock(*lock);
+
+  if(message.getChannel() != 1) return;
+  // We currently respond only to messages on channel 1. This is a provision for later allowing
+  // different slots respond to different channels. I guess it may break behavior, if the user
+  // has a saved project which sends on another channel and a later version responds differently
+  // ...but maybe not...but better safe than sorry - we now force the user to use channel 1 for 
+  // better project compatibility with future versions. Maybe for each slot, we should have a 
+  // set of flags 1..16 and responds to messages on all channels which have the flag set - use 
+  // class RAPT::rsFlages16
+
+
+  //rsMidiMessageHandler::MidiHandleInfo info;   // filled out by the voiceManager
+  //voiceManager.handleMidiMessage(message, &info);
+  // maybe the voiceManager should return some information, specifically, which voice was assigned
+  // and we may have to pass this information to the child modules in the llop below - maybe we 
+  // need to introduce a new callback handleMidiMessage(const MidiMessage&, int voice)
+
+  int voice = voiceManager.handleMidiMessageReturnVoice(message);
+  if(voice < 0) return;
+  // If no voice was allocated or used for the event, we don't pass it on to the child modules to 
+  // free them from having to handle this condition themselves. So the child modules can expect 
+  // that they always receive a valid voice index in their per voice callbacks. This simplifies 
+  // their implementations of which we will have many, so it's worth it.
+
   for(int i = 0; i < size(modules); i++){
     AudioModuleWithMidiIn *m = dynamic_cast<AudioModuleWithMidiIn*> (modules[i]);
     if(m != nullptr)
-      m->handleMidiMessage(message); }
+      m->handleMidiMessageForVoice(message, voice); } 
 
-  // todo: maybe let different slots receive MIDI on different channels
+  //voiceManager.handleMidiMessage(message);
+  //for(int i = 0; i < size(modules); i++){
+  //  AudioModuleWithMidiIn *m = dynamic_cast<AudioModuleWithMidiIn*> (modules[i]);
+  //  if(m != nullptr)
+  //    m->handleMidiMessage(message); }   // todo: pass info
+  //    // the child modules inquire the voiceIndex from the info
+
+  // todo: maybe let different slots receive MIDI on different channels, maybe 
+  // AudioModuleWithMidiIn should have a means to filter midi messages based on their channel and
+  // respond only, if the message passes the filter
+
+
   // and/or don't override the noteOn/etc. functions here but rather let the MIDI events also
   // pass through the modules in series. most modules just pass them through, but we can also
   // have MIDI effects such as appregiators and sequencers which modify the sequence and pass
@@ -318,7 +383,7 @@ XmlElement* ToolChain::getStateAsXml(const juce::String& stateName, bool markAsC
     xml->addChildElement(child);
   }
 
-  xml->addChildElement(modManager.getStateAsXml()); 
+  xml->addChildElement(modManager->getStateAsXml()); 
   // do this also in ModulatableAudioModule...wait no - the mod-settings are only stored in the 
   // top-level module, maybe we should have a ModManagerAudioModule as baseclass which contains the
   // ModulationManager. then, instead of calling xml = AudioModule::getStateAsXml(stateName, markAsClean); 
@@ -401,7 +466,7 @@ void ToolChain::recallSlotsFromXml(const XmlElement &xmlState, bool markAsClean)
       m->setSampleRate(sampleRate);
       //m->setMetaParameterManager(metaParamManager);      // so, the meta-mapping gets recalled
       setupManagers(m);
-      auto moduleState = slotState->getChildElement(0);
+      XmlElement *moduleState = slotState->getChildElement(0);
       m->setStateFromXml(*moduleState, "", markAsClean); // set the state of the module before...
       addModule(m);                                      // ...adding it, so the newly created
       i++;                                               // editor has correct initial state
@@ -412,10 +477,10 @@ void ToolChain::recallSlotsFromXml(const XmlElement &xmlState, bool markAsClean)
 // move to ModulatableAudioModule:
 void ToolChain::recallModulationsFromXml(const XmlElement &xmlState)
 {
-  modManager.removeAllConnections();
-  auto modXml = xmlState.getChildByName("Modulations");
+  modManager->removeAllConnections();
+  XmlElement* modXml = xmlState.getChildByName("Modulations");
   if(modXml != nullptr)
-    modManager.setStateFromXml(*modXml);  // recall modulation settings
+    modManager->setStateFromXml(*modXml);  // recall modulation settings
 }
 
 void ToolChain::setupManagers(AudioModule* m)
@@ -424,8 +489,30 @@ void ToolChain::setupManagers(AudioModule* m)
   m->setMetaParameterManager(metaParamManager); 
   ModulatableAudioModule* mm = dynamic_cast<ModulatableAudioModule*>(m);
   if(mm)
-    mm->setModulationManager(&modManager);
+    mm->setModulationManager(modManager);
+  AudioModulePoly* pm = dynamic_cast<AudioModulePoly*> (m);
+  if(pm != nullptr)
+  {
+    pm->setVoiceManager(&voiceManager);
+    pm->setVoiceSignalBuffer(&voiceSignals[0]);
+  }
 }
+
+/*
+void ToolChain::allocateVoiceResources(rosic::rsVoiceManager* voiceManager)
+{
+  voiceSignals.resize(2*voiceManager->getMaxNumVoices());
+  for(size_t i = 0; i < modules.size(); i++) 
+  {
+    AudioModulePoly* pm = dynamic_cast<AudioModulePoly*> (modules[i]);
+    if(pm != nullptr)
+    {
+      pm->allocateVoiceResources(&voiceManager);
+      pm->setVoiceSignalBuffer(&voiceSignals[0]);
+    }
+  }
+}
+*/
 
 void ToolChain::addToModulatorsIfApplicable(AudioModule* module)
 {
@@ -433,7 +520,7 @@ void ToolChain::addToModulatorsIfApplicable(AudioModule* module)
   if(ms != nullptr)
   {
     assignModulationSourceName(ms);
-    modManager.registerModulationSource(ms);
+    modManager->registerModulationSource(ms);
   }
 }
 
@@ -441,7 +528,7 @@ void ToolChain::removeFromModulatorsIfApplicable(AudioModule* module)
 {
   ModulationSource* ms = dynamic_cast<ModulationSource*> (module);
   if(ms != nullptr)
-    modManager.deRegisterModulationSource(ms);
+    modManager->deRegisterModulationSource(ms);
 }
 
 void ToolChain::assignModulationSourceName(ModulationSource* source)
@@ -473,6 +560,36 @@ void ToolChain::clearModulesArray()
     deleteLastModule();
 }
 
+void ToolChain::createMidiModSources()
+{
+  constantModulator = 
+    new rsConstantOneModulatorModulePoly(lock, metaParamManager, modManager);
+  notePitchModulator = 
+    new rsNotePitchModulatorModulePoly(lock, metaParamManager, modManager);
+  noteFreqModulator = 
+    new rsNoteFreqModulatorModulePoly(lock, metaParamManager, modManager);
+  noteVelocityModulator = 
+    new rsNoteVelocityModulatorModulePoly(lock, metaParamManager, modManager);
+
+  constantModulator->setVoiceManager(&voiceManager);
+  notePitchModulator->setVoiceManager(&voiceManager);
+  noteFreqModulator->setVoiceManager(&voiceManager);
+  noteVelocityModulator->setVoiceManager(&voiceManager);
+
+  modManager->registerModulationSource(constantModulator);
+  modManager->registerModulationSource(notePitchModulator);
+  modManager->registerModulationSource(noteFreqModulator);
+  modManager->registerModulationSource(noteVelocityModulator);
+}
+
+void ToolChain::deleteMidiModSources()
+{
+  delete constantModulator;
+  delete notePitchModulator;
+  delete noteFreqModulator;
+  delete noteVelocityModulator;
+}
+
 void ToolChain::createDebugModSourcesAndTargets()
 {
   // This code was for debugging only and can eventually be thrown away...
@@ -486,7 +603,7 @@ void ToolChain::createDebugModSourcesAndTargets()
   env->setModuleName("Envelope1");
   addChildAudioModule(env);
 
-  modManager.registerModulationSource(env);
+  modManager->registerModulationSource(env);
 
   ModulatableParameter* p = 
     new ModulatableParameter("Gain", -60.0, -20.0, 0.0, Parameter::LINEAR, 0.01);
@@ -509,6 +626,8 @@ void ToolChain::createDebugModSourcesAndTargets()
 
 void ToolChain::populateModuleFactory()
 {
+  //ScopedLock scopedLock(*lock);
+
   typedef CriticalSection* CS;
   typedef AudioModule* AM;
   CS cs = lock;
@@ -525,7 +644,7 @@ void ToolChain::populateModuleFactory()
 #endif
 
   s = "Sources";
-
+  // no sources available yet, todo: move TriSawOsc, etc. here, when done, implement QuadSource
 
   s = "Filters";
   f.registerModuleType([](CS cs)->AM { return new EqualizerAudioModule(cs);       }, s, "Equalizer");
@@ -534,7 +653,6 @@ void ToolChain::populateModuleFactory()
 
   s = "Modulators";
   f.registerModuleType([](CS cs)->AM { return new BreakpointModulatorAudioModule(cs); }, s, "BreakpointModulator");
-  f.registerModuleType([](CS cs)->AM { return new TriSawModulatorModule(cs); },          s, "TriSawModulator");
 
 
   s = "Dynamics";
@@ -561,6 +679,7 @@ void ToolChain::populateModuleFactory()
 
   // Sources:
   f.registerModuleType([](CS cs)->AM { return new SineOscAudioModule(cs);  },           s, "SineOscillator");
+  f.registerModuleType([](CS cs)->AM { return new SineOscAudioModulePoly(cs);  },       s, "SineOscillatorPoly");
   f.registerModuleType([](CS cs)->AM { return new TriSawOscModule(cs);  },              s, "TriSawOscillator");
   f.registerModuleType([](CS cs)->AM { return new EllipseOscillatorAudioModule(cs);  }, s, "EllipseOscillator");
   f.registerModuleType([](CS cs)->AM { return new RotationOscillatorAudioModule(cs); }, s, "Oscillator3D");
@@ -575,8 +694,13 @@ void ToolChain::populateModuleFactory()
   //f.registerModuleType([](CS cs)->AM { return new CrossOverAudioModule(cs);       }, s, "CrossOver");
 
   // Modulators:
+  f.registerModuleType([](CS cs)->AM { return new AttackDecayEnvelopeModulePoly(cs); },      s, "EnvelopeAD");
   f.registerModuleType([](CS cs)->AM { return new AttackDecayEnvelopeModule(cs); },      s, "AttackDecayEnvelope");
   //f.registerModuleType([](CS cs)->AM { return new AttackDecayEnvelopeModulePoly(cs); },      s, "AttackDecayEnvelope");
+  f.registerModuleType([](CS cs)->AM { return new TriSawModulatorModule(cs); },          s, "TriSawModulator");
+  // rename to TriSawLFO
+
+
 
   // Effects:
   //f.registerModuleType([](CS cs)->AM { return new NodeShaperAudioModule(cs);   }, s, "NodeShaper");
@@ -589,7 +713,7 @@ void ToolChain::populateModuleFactory()
   // Instruments:
   f.registerModuleType([](CS cs)->AM { return new ModalSynthAudioModule(cs);   }, s, "ModalSynth");
   f.registerModuleType([](CS cs)->AM { return new QuadrifexAudioModule(cs);    }, s, "Quadrifex");
-  f.registerModuleType([](CS cs)->AM { return new NewSynthAudioModule(cs);     }, s, "NewSynth");
+  //f.registerModuleType([](CS cs)->AM { return new NewSynthAudioModule(cs);     }, s, "NewSynth");
   //f.registerModuleType([](CS cs)->AM { return new MagicCarpetAudioModule(cs);   }, s, "MagicCarpet");
   f.registerModuleType([](CS cs)->AM { return new SamplePlayerAudioModule(cs);    }, s, "SamplePlayer");
   f.registerModuleType([](CS cs)->AM { return new BlepOscArrayModule(cs);    }, s, "BlepOscArray");
@@ -853,7 +977,12 @@ void ToolChainEditor::paintOverChildren(Graphics& g)
   if(size(selectors) == 0)   // occurs during state recall
     return;
 
-  g.setColour(Colour::fromFloatRGBA(0.8125f, 0.8125f, 0.8125f, 1.f));// maybe switch depending on widget color-scheme (dark-on-bright vs bright-on-dark)
+  g.setColour(Colour::fromFloatRGBA(0.8125f, 0.8125f, 0.8125f, 1.f));
+  // maybe switch depending on widget color-scheme (dark-on-bright vs bright-on-dark)
+
+  jassert(chain->activeSlot < selectors.size()); 
+  // ..i once had a weird crash - not sure, if that was out of range
+
   juce::Rectangle<int> rect = selectors[chain->activeSlot]->getBounds();
   g.drawRect(rect, 2);  // 2nd param: thickness
 }
@@ -928,3 +1057,34 @@ void ToolChainEditor::clearEditorArray()
     removeChildColourSchemeComponent(editors[i], true);
   editors.clear();
 }
+
+/*
+
+Bugs:
+-Load patch Acid2 and then _TestSineOscPoly3 -> crash
+ -when the patch is loaded, the module will call moduleWillBeDeleted on the editor
+ -the editor will call scheduleSelectorArrayUpdate
+ -paintOverChildren is called - the selectorArray does not seem to be updated yet - but i guess,
+  it should be - seems like updateSelectorArray is called too late (asynchronously)
+  -maybe in audioModuleWillBeDeleted, we should call a function deleteSelector(index) similar to
+   deleteEditor(index) instead of scheduleSelectorArrayUpdate
+-If a limiter (or gain) is placed after a poly-sine osc and the modulator is placed after the 
+ limiter, the limiter has no effect
+-load a fresh SineOscillatorStereo and play a not: silence. we only get sound if we wire (for 
+ example) NoteFrequency to Frequency
+-load patch _TestSineOscPoly2 and connect the EnvelopeAD to the frequency - the envelope does
+ have effect, but attack/decay parameters in the dsp object do not reflect the settings. moving 
+ the sliders for attack/decay also has no effect. in _TestSineOscPoly3 the do have effect. the
+ difference is that they are wired to the constant1 modulator (with 0 depth)
+-Poly modulators (and generators?) do not update their parameters when the slider is moved but no 
+ modulator is connected
+-the order of the modulation connections is not always the same as we wired them up
+-when moving slider during playing, it sometimes seems to hang and glitch and does not recover
+ ...waiting and then playing more notes just produces audio fragments
+
+
+ToDo:
+-FuncShaper: have a DryDelay parameter - mostly for compensating the latency of the AA filter but 
+ may be an interestinf effect as well
+
+*/

@@ -31,13 +31,14 @@ public:
   (...try to avoid using it - prefer RAII) */
   rsMatrix2x2() {}
 
-
+  //-----------------------------------------------------------------------------------------------
   /** \name Setup */
-
 
   /** Sets up the elements of the matrix. */
   void setValues(T a, T b, T c, T d) { this->a = a; this->b = b; this->c = c; this->d = d; }
 
+  /** Sets all elements of the matrix to zero. */
+  void setZero() { this->a = this->b = this->c = this->d = T(0); }
 
   //-----------------------------------------------------------------------------------------------
   /** \name Inquiry */
@@ -88,7 +89,7 @@ public:
     T ev1 = getEigenvalue1();
     T ev2 = getEigenvalue2();
     Mat I = identity();
-    if(ev1 != ev2) {
+    if(ev1 != ev2) {       // ToDo: maybe a tolerance is needed
       T ab  = T(1) / (ev1 - ev2);
       Mat X = ab * ((*this) - ev2*I);
       Mat Y = ab * (ev1*I - (*this));
@@ -140,7 +141,6 @@ public:
 
   static rsMatrix2x2<T> identity() { return rsMatrix2x2<T>(T(1), T(0), T(0), T(1)); }
 
-
   /** Returns the commutator of the two matrices A and B: C = A*B - B*A. In general, matrix
   multiplication is non-commutative, but for some special cases, it may be commutative nonetheless.
   The commutator captures, how non-commutative two matrices behave when being multiplied. If the
@@ -151,6 +151,41 @@ public:
   }
   // see: https://en.wikipedia.org/wiki/Commutator#Ring_theory
   // maybe implement also the anticommutatior defined there as: {A,B} = A*B + B*A
+
+  //-----------------------------------------------------------------------------------------------
+  /** \name Misc */
+
+  /** Solves A*x = b for x. */
+  static void solve(const rsMatrix2x2<T>& A, rsVector2D<T>& x, const rsVector2D<T>& b)
+  {
+    //T tol = 1000 * RS_EPS(T);
+    //rsAssert(rsAbs(A.getDeterminant()) > tol, "Handling of singular matrices not implemented");
+    // maybe we should divide the determinant by the maximum of the matrix elements or something
+    // to get a relative measure - we hit this, when all elements are very small, wich should not 
+    // be considered to be a problem
+
+    T D = A.getDeterminant();
+    T s = T(1) / D;
+    x.x = s * (A.d * b.x - A.b * b.y);
+    x.y = s * (A.a * b.y - A.c * b.x);
+
+    //rsMatrix2x2<T> Ai = A.getInverse();
+    //x.x = Ai.a * b.x + Ai.b * b.y;
+    //x.y = Ai.c * b.x + Ai.d * b.y;
+  }
+  // todo: optimize, handle singluar matrices: in the overdetermined case, produce a least squares
+  // approximation, in the underdetermined case, produce a minimum norm solution
+  // maybe implement it without using rsVector2D - just take references to coordinates instead
+
+  /** Like solve, but checks for division by zero and assigns zero to the result in this case. */
+  static void solveSave(const rsMatrix2x2<T>& A, rsVector2D<T>& x, const rsVector2D<T>& b)
+  {
+    T D = A.getDeterminant();
+    if(D == T(0)) { x.x = x.y = T(0); return; }
+    T s = T(1) / D;
+    x.x = s * (A.d * b.x - A.b * b.y);
+    x.y = s * (A.a * b.y - A.c * b.x);
+  }
 
 };
 
@@ -210,8 +245,8 @@ public:
   // maybe rename to setShape for consistency with the rest of the library...otoh, reshape is
   // consistent with NumPy
 
-  /** Resets the number of rows and columns to zero and the dataPointer to nullptr. Should be called
-  whenever you need to invalidate our pointer member. */
+  /** Resets the number of rows and columns to zero and the dataPointer to nullptr. Should be 
+  called whenever you need to invalidate our pointer member. */
   void reset()
   {
     numRows = 0;
@@ -324,6 +359,22 @@ public:
   }
   // needs test
 
+  /** Returns true, iff this matrix (denoted as A) is symmetric (up to a given tolerance), i.e. 
+  A(i,j) == A(j,i) for all i,j. Symmetry considerations usually apply only to square matrices. If 
+  A isn't a square matrix, it will be considered non-symmetric, regardless of its content. */
+  bool isSymmetric(T tol = T(0)) const
+  {
+    if(numRows != numCols) return false;  // non-square matrices are never considered symmetric
+    for(int i = 1; i < numRows; i++) {
+      for(int j = i; j < numCols; j++) {
+        T d = rsAbs(at(i,j) - at(j,i));
+        if(d > tol)
+          return false; }}
+    return true;
+  }
+  // needs test, todo: implement test for antisymmetry - the struture is the same, just that we 
+  // need to use at(i,j) + at(j,i) instead of at(i,j) - at(j,i)
+
 
   /** Returns a const pointer to the data for read access as a flat array. */
   const T* getDataPointerConst() const { return dataPointer; }
@@ -365,6 +416,14 @@ public:
   /** Returns the maximum absolute value of all elements in the matrix. */
   T getAbsoluteMaximum() const { return rsArrayTools::maxAbs(dataPointer, getSize()); }
 
+  /** Returns the number of nonzero elements in this matrix. */
+  int getNumNonZeros() const { return rsArrayTools::numNonZeros(dataPointer, getSize()); }
+
+  /** Returns the density of this matrix which is a number between 0 and 1 defined as the number 
+  of nonzero elements divided by the total number of elements. Sparse matrices have a low density
+  (near zero), fully populated matrices have a density of 1. */
+  T getDensity() const { return T(getNumNonZeros()) / T(getSize()); }
+
   /** Computes the trace of the matrix which is the sum of the diagonal elements. */
   T getTrace() const
   {
@@ -382,7 +441,7 @@ public:
       p = p * this->at(i, i);
     return p;
   }
-  // todo: use *= - (needs implementation of that operator in rsRationlaFunction)
+  // todo: use *= - (needs implementation of that operator in rsRationalFunction)
 
   // todo: getTrace(), getDiagonalProduct()
 
@@ -478,7 +537,7 @@ public:
       rsSwap((*this)(i1, j), (*this)(i2, j));
   }
   // may be optimized by using fixed base-pointers to each row and loop increment 1 - no
-  // recompuation of the row-start in te iterations - the (i,j) operator always does a
+  // recompuation of the row-start in the iterations - the (i,j) operator always does a
   // multiplication
 
   /** Adds a multiple of the row with index iSrc to the row with index iDst. The multiplier is
@@ -489,6 +548,7 @@ public:
     for(int j = 0; j < numCols; ++j)
       (*this)(iDst, j) += weight * (*this)(iSrc, j);
   }
+  // maybe rename to addScaledRowToOther - 2 chars shorter
   // optimize using base-pointers
 
   /** Like above but does it only for the column-indices in between minCol and maxCol (both
@@ -563,6 +623,21 @@ public:
     rsAssert(areSameShape(A, B) && areSameShape(A, *C), "arguments incompatible");
     rsArrayTools::subtract(A.dataPointer, B.dataPointer, C->dataPointer, A.getSize());
   }
+
+  /** Weighted sum of the mA x nA matrix A and the mB x nB matrix B. The result matrix C needs 
+  to have a shape max(mA, mB) x max(nA, nB). For rows or columns that are present in one matrix 
+  but not in the other, the other matrix is zero padded appropriately. */
+  static void weightedSum(const rsMatrixView<T>& A, T wA, const rsMatrixView<T>& B, T wB,
+    rsMatrixView<T>& C)
+  {
+    int M = rsMax(A.getNumRows(),    B.getNumRows());
+    int N = rsMax(A.getNumColumns(), B.getNumColumns());
+    rsAssert(C.hasShape(M, N));
+    for(int m = 0; m < M; m++)
+      for(int n = 0; n < N; n++)
+        C(m, n) = wA * A.getElementPadded(m, n) + wB * B.getElementPadded(m, n);
+  }
+  // needs test
 
   /** Multiplies the two matrices element-wise. */
   static void elementwiseMultiply(
@@ -663,7 +738,7 @@ public:
   /** Computes the matrix-vector product y = A*x of this matrix with the given vector x and stores
   the result in y where x and y are given as raw arrays. The length of x must match the number of
   columns and the length of y must match the number of rows. */
-  void productWith(const T* x, T* y) const
+  void product(const T* x, T* y) const
   {
     rsAssert(x != y, "Can't be used in place");
     for(int i = 0; i < getNumRows(); i++) {
@@ -671,12 +746,36 @@ public:
       for(int j = 0; j < getNumColumns(); j++)
         y[i] += at(i, j) * x[j]; }
   }
+  // maybe rename to product (also in rsSparseMatrix)
 
   /** Convenience function to compute matrix-vector product y = A*x, taking a raw array for x as
   input and producing the result as a std::vector. */
   std::vector<T> productWith(const T* x) const
-  { std::vector<T> y(getNumRows()); productWith(x, &y[0]); return y; }
+  { std::vector<T> y(getNumRows()); product(x, &y[0]); return y; }
 
+  /** 2D convolution of the two matrices A and B into the result matrix C. The number of rows and 
+  columns of C must equal the sum of the respective numbers of A and B minus 1. */
+  static void convolve(
+    const rsMatrixView<T>& A, const rsMatrixView<T>& B, rsMatrixView<T>* C)
+  {
+    int Ma = A.numRows; int Na = A.numCols;
+    int Mb = B.numRows; int Nb = B.numCols;
+    int Mc = Ma+Mb-1;   int Nc = Na+Nb-1;
+    rsAssert(C->numRows == Mc && C->numCols == Nc, "Result matrix has wrong shape");
+    for(int m = 0; m < Mc; m++) {
+      for(int n = 0; n < Nc; n++) {
+        T s = T(0);
+        for(int i = rsMax(0, m-Ma+1); i <= rsMin(Mb-1, m); i++) {
+          for(int j = rsMax(0, n-Na+1); j <= rsMin(Nb-1, n); j++) {
+            s += B(i, j) * A(m-i, n-j);  }}
+        (*C)(m, n) = s; }}
+  }
+  // ToDo: 
+  // -make it possible to work in place -> reverse directions of outer loops, i.e. run m from
+  //  Mc-1 down to 0 and likewise for n
+  // -implement this algo - it is nice: it reduces the 2D convolution problem to a 1D 
+  //  convolution: Polynomial multiplication and FFT
+  //  https://cseweb.ucsd.edu/~slovett/teaching/SP15-CSE190/poly-mult-and-FFT.pdf
 
   //-----------------------------------------------------------------------------------------------
   /** \name Accessors */
@@ -696,6 +795,15 @@ public:
   // maybe rename to get - do we actually need this? - if not, get rid!
 
   // void set(i, j, val) ...to make it compatible with old implementation
+
+  /** Returns the element at index pair i,j or padding, if i or j is out of range. Can be used to 
+  conveniently access elements of a (zero-)padded matrix. */
+  T getElementPadded(const int i, const int j, const T padding = T(0)) const
+  {
+    if(!isValidRowIndex(i) || !isValidColumnIndex(j))
+      return padding;
+    return dataPointer[flatIndex(i, j)];
+  }
 
   /** Converts a row index i and a column index j to a flat array index. */
   int flatIndex(const int i, const int j) const
@@ -744,14 +852,14 @@ public:
   /** Standard constructor. You must pass the initial number of rows and columns */
   rsMatrix(int numRows = 0, int numColumns = 0)
   {
-    setSize(numRows, numColumns);
+    setShape(numRows, numColumns);
     // todo: optionally init with zeros
   }
 
   /** Constructor to create a matrix from a flat raw array. */
   rsMatrix(int numRows, int numColumns, const T* data)
   {
-    setSize(numRows, numColumns);
+    setShape(numRows, numColumns);
     rsArrayTools::copy(data, this->getDataPointer(), this->getSize());
   }
 
@@ -759,7 +867,7 @@ public:
   matrices in the old representation into the new one. */
   rsMatrix(int numRows, int numColumns, T** data)
   {
-    setSize(numRows, numColumns);
+    setShape(numRows, numColumns);
     for(int i = 0; i < numRows; i++)
       for(int j = 0; j < numColumns; j++)
         (*this)(i,j) = data[i][j];
@@ -794,10 +902,20 @@ public:
     updateDataPointer();
   }
 
+  rsMatrix(int numRows, int numColumns, std::initializer_list<T> l) : data(l) 
+  {
+    numHeapAllocations++;   // data(l) allocates
+    rsAssert(numRows*numColumns == l.size());
+    this->numRows = numRows;
+    this->numCols = numColumns;
+    updateDataPointer();
+  }
+  // needs tests
+
   /** Copy constructor. Copies data from B into this object.  */
   rsMatrix(const rsMatrix& B)
   {
-    setSize(B.numRows, B.numCols);
+    setShape(B.numRows, B.numCols);
     rsArrayTools::copy(B.dataPointer, this->dataPointer, this->getSize());
   }
 
@@ -815,7 +933,7 @@ public:
   rsMatrix<T>& operator=(const rsMatrix<T>& rhs)
   {
     if (this != &rhs) { // self-assignment check expected
-      setSize(rhs.numRows, rhs.numCols);
+      setShape(rhs.numRows, rhs.numCols);
       rsArrayTools::copy(rhs.dataPointer, this->dataPointer, this->getSize());
     }
     return *this;
@@ -866,7 +984,8 @@ public:
   /** Sets the number of rows and columns, this matrix should have. ToDo: provide a way to retain
   the data (optionally) - what does std::vector's resize do? Does it retain data...but if it does,
   it would be useless anyway in case the number of columns changed. */
-  void setSize(int numRows, int numColumns)
+  //void setSize(int numRows, int numColumns)
+  void setShape(int numRows, int numColumns)
   {
     if(numRows == this->numRows && numColumns == this->numCols)
       return;  // nothing to do
@@ -884,7 +1003,7 @@ public:
   template<class T2>
   void copyDataFrom(const rsMatrixView<T2>& A)
   {
-    setSize(A.getNumRows(), A.getNumColumns());
+    setShape(A.getNumRows(), A.getNumColumns());
     rsArrayTools::convert(A.getDataPointerConst(), this->dataPointer, this->getSize());
   }
 
@@ -1060,6 +1179,13 @@ public:
   }
   // needs test - maybe optimize inner loop by avoiding re-computation of row base index
 
+  /** Convolves this matrix with matrix B and returns the result. */
+  rsMatrix<T> getConvolutionWith(const rsMatrix<T>& B)
+  {
+    rsMatrix<T> C(this->numRows + B.numRows - 1, this->numCols + B.numCols - 1);
+    rsMatrixView<T>::convolve(*this, B, &C);
+    return C;
+  }
 
   //-----------------------------------------------------------------------------------------------
   /** \name Misc */
@@ -1136,8 +1262,8 @@ rsMatrix<T> matrixPhases(const rsMatrix<std::complex<T>>& A)
   return phases;
 }
 
-// maybe factor out common code...maybe something like applyMatrixFunction with different
-// input and output types for the template parameter:
+// maybe factor out common code (keeping the above as covenience functions)...maybe something like 
+// applyMatrixFunction with different input and output types for the template parameter:
 
 /*
 template<class TIn, class TOut, class F>
@@ -1152,6 +1278,9 @@ rsMatrix<TOut> matrixFunction(const rsMatrix<TIn>& A, F func)
   return out;
 }
 */
+
+// ...but how is the compiler supposed to infer TOut? maybe it should be a member function "apply"
+// of rsMatrix<TOut>, so TOut can be infered from that
 
 
 //-------------------------------------------------------------------------------------------------

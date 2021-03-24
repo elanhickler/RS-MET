@@ -1,4 +1,5 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
+
 <Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="TestsRosicAndRapt\Source\Misc">
@@ -478,6 +479,9 @@
       <Filter>TestsRosicAndRapt\Source\rapt_tests\Experiments</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\Experiments\Experiments.cpp">
+      <Filter>TestsRosicAndRapt\Source\Experiments</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Source\Experiments\PrototypesForAPE.cpp">
       <Filter>TestsRosicAndRapt\Source\Experiments</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Source\rosic_tests\PortedFromRSLib\UnUsedTestsRSLib.cpp">
@@ -1396,6 +1400,9 @@
       <Filter>JUCE Modules\rosic\_third_party\kiss_fft_v1_2_6\test</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rosic\_third_party\kiss_fft_v1_2_6\test\pstats.c">
+      <Filter>JUCE Modules\rosic\_third_party\kiss_fft_v1_2_6\test</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rosic\_third_party\kiss_fft_v1_2_6\test\tailscrap.m">
       <Filter>JUCE Modules\rosic\_third_party\kiss_fft_v1_2_6\test</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rosic\_third_party\kiss_fft_v1_2_6\test\test_real.c">
@@ -2553,6 +2560,9 @@
     <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\FilterDesign\PoleZeroPrototype.cpp">
       <Filter>JUCE Modules\rs_testing\Prototypes\FilterDesign</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\BivariatePolynomial.cpp">
+      <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\Drawing.cpp">
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClCompile>
@@ -2577,6 +2587,9 @@
     <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\ParticleSystem.cpp">
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\PiecewisePolynomial.cpp">
+      <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\Polygon.cpp">
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClCompile>
@@ -2599,6 +2612,9 @@
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\Tensor.cpp">
+      <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\TrivariatePolynomial.cpp">
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\TestTools\Utilities\FileWriting.cpp">
@@ -2655,6 +2671,9 @@
       <Filter>TestsRosicAndRapt\Source\rapt_tests\UnitTests</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\Experiments\Experiments.h">
+      <Filter>TestsRosicAndRapt\Source\Experiments</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Source\Experiments\PrototypesForAPE.h">
       <Filter>TestsRosicAndRapt\Source\Experiments</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Source\rosic_tests\PortedFromRSLib\UnUsedTestsRSLib.h">
@@ -2901,6 +2920,9 @@
       <Filter>JUCE Modules\rapt\Data</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rapt\Data\Data.h">
+      <Filter>JUCE Modules\rapt\Data</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rapt\Data\Graphs.h">
       <Filter>JUCE Modules\rapt\Data</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rapt\Data\MatrixTools.h">
@@ -4883,6 +4905,9 @@
     <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\FilterDesign\PoleZeroPrototype.h">
       <Filter>JUCE Modules\rs_testing\Prototypes\FilterDesign</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\BivariatePolynomial.h">
+      <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\Drawing.h">
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClInclude>
@@ -4907,6 +4932,9 @@
     <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\ParticleSystem.h">
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\PiecewisePolynomial.h">
+      <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\Polygon.h">
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClInclude>
@@ -4929,6 +4957,9 @@
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\Tensor.h">
+      <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\Prototypes\TrivariatePolynomial.h">
       <Filter>JUCE Modules\rs_testing\Prototypes</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\..\Libraries\RobsJuceModules\rs_testing\TestTools\Utilities\FileWriting.h">

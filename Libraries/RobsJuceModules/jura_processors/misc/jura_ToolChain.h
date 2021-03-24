@@ -12,6 +12,7 @@ kinds of state changes.
 the pointers along as well
 */
 
+
 class JUCE_API ToolChainObserver
 {
 
@@ -52,15 +53,13 @@ AudioModule objects.
 
  */
 
-class JUCE_API ToolChain  : public jura::AudioModuleWithMidiIn
-  /*, public jura::ModulationManager*/
-  // we need to have a ModulationManager member to pass it to the constructor of
-  // AudioModuleWithMidiIn
+class JUCE_API ToolChain :  public jura::AudioModuleWithMidiIn 
 {
 
 public:
 
   ToolChain(CriticalSection *lockToUse, MetaParameterManager* metaManagerToUse = nullptr);
+
   virtual ~ToolChain();
 
   //-----------------------------------------------------------------------------------------------
@@ -173,6 +172,10 @@ protected:
   the passed module. */
   void setupManagers(AudioModule* module);
 
+  // Might become relevant when we want to allow the user to change the maxNumVoices at runtime. 
+  // Currently, this is fixed after construction..
+  //void allocateVoiceResources(rosic::rsVoiceManager* voiceManager) override;
+
   /** Checks, if the passed AudioModule can be cast into a ModulationSource and if so, adds it to
   our array of ModulationSources (inherited from ModulationManager). */
   void addToModulatorsIfApplicable(AudioModule* module);
@@ -189,6 +192,11 @@ protected:
   /** Clears the array of AudioModules which means als to delete all objects. */
   void clearModulesArray();
 
+
+  void createMidiModSources();
+
+  void deleteMidiModSources();
+
   /** Just some temporary throwaway code to figure out what is going wrong with the mod-system in
   Elan's SpiralGenerator. */
   void createDebugModSourcesAndTargets();
@@ -197,7 +205,15 @@ protected:
   void populateModuleFactory();
                      
 
-  ModulationManager modManager;
+  //ModulationManager modManager;
+  ModulationManagerPoly *modManager;  
+  // This is really strange: when switching to using ModulationManagerPoly instead of the baseclass
+  // ModulationManager, i also had to change to using a pointer instead of a direct object because
+  // otherwise i got heap corruptions. Why is that? Is it because we pass pointers to it other 
+  // objects and the address operator does not work properly when it's a subclass? It happened 
+  // right after creating the subclass - it literally did not have any additional member variables
+  // or functions or overrides.
+
   // name clash with modManager inherited ModulationParticipant (baseclass of 
   // ModulatableAudioModule) - maybe rename this
 
@@ -206,6 +222,21 @@ protected:
 
   double sampleRate = 44100;
   std::vector<ToolChainObserver*> observers;
+
+
+  rsVoiceManager voiceManager;
+  std::vector<double> voiceSignals; // Used to share/re-use a single 
+  // buffer for the voice-signals of the modules (using either overwriting or accumulation - 
+  // whatever is most appropriate for the particular module). For the time being, each module 
+  // allocates it own buffer.
+
+  // The modulation sources that are always available:
+  rsConstantOneModulatorModulePoly*  constantModulator;
+  rsNotePitchModulatorModulePoly*    notePitchModulator;
+  rsNoteFreqModulatorModulePoly*     noteFreqModulator;
+  rsNoteVelocityModulatorModulePoly* noteVelocityModulator;
+
+
 
   friend class ToolChainEditor;
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ToolChain)
@@ -278,7 +309,7 @@ protected:
 
   /** Sends out a change message that we will receive ourselves. On receive, we will call
   updateSelectorArray. This mechanism is used to cause a deferred update of the selectors array 
-  from replaceModule. The deferrence is necessray, because replaceModule is called from 
+  from replaceModule. The deferrence is necessarry, because replaceModule is called from 
   rComboBoxChanged - if we would call updateSelectorArray directly in replaceModule, we would 
   possibly delete the combobox that has changed before rComboBoxChanged returns which results
   in a combox trying to update itself with an invalid this-pointer. So, we need a deferred 

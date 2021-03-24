@@ -59,7 +59,7 @@ public:
   void setDensity(TCor newDensity) { density = newDensity; }
 
   /** Sets a limit of the number of artificial datapoints that may be inserted per drawing
-  operation. This is important to keep the cpu usage under control. */
+  operation. This is important to keep the CPU usage under control. */
   void setMaxNumDotsPerSegment(int newMaxNumDots) { maxNumDots = newMaxNumDots; }
 
   /** Sets the buffers to be used for the produced points (x- and y-coordinates as well as weights
@@ -115,7 +115,7 @@ protected:
   // , dotsCubic2D, ...
 
   /** After the polynomial coefficient arrays a, b have been computed, this function fills the 
-  array for the parameter t with values at which we evaluate the spline segment give by the 
+  array for the parameter t with values at which we evaluate the spline segment given by the 
   parametric equations:
   x(t) = a0 + a1*t + a2*t^2 + a3*t
   y(t) = b0 + b1*t + b2*t^2 + b3*t  
@@ -157,6 +157,6 @@ protected:
   std::vector<TCor> r, s, t, u; 
 
 };
-// maybe rename to RealTimeSplineGenerator
+// maybe rename to RealTimeSplineGenerator or Interpolator
 
 #endif

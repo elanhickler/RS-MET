@@ -47,6 +47,8 @@ public:
     y *= s;
   }
 
+  void setZero() { x = y = T(0); }
+
 
   //-----------------------------------------------------------------------------------------------
   /** \name Operators */
@@ -153,6 +155,7 @@ T rsDot(const rsVector2D<T>& a, const rsVector2D<T>& b)
 {
   return a.x * b.x + a.y * b.y;
 }
+// allow syntax a.dot(b);
 
 /** Returns the Euclidean norm of vector a. */
 template<class T>
@@ -160,6 +163,7 @@ T rsNorm(const rsVector2D<T>& a)
 {
   return sqrt(rsDot(a, a));
 }
+// allow syntax a.norm(); have also a.squaredNorm()
 
 
 
@@ -218,6 +222,9 @@ public:
   //-----------------------------------------------------------------------------------------------
   /** \name Operators */
 
+  /** Unary minus. */
+  rsVector3D<T> operator-() const { return rsVector3D<T>(-x, -y, -z); }
+
   /** Adds vector v to this vector. */
   rsVector3D<T>& operator+=(const rsVector3D<T>& v) { x += v.x; y += v.y; z += v.z; return *this; }
 
@@ -231,10 +238,22 @@ public:
   rsVector3D<T>& operator/=(T s) { s = 1/s; x *= s; y *= s; z *= s; return *this; }
 
   /** Compares two vectors for equality. */
-  bool operator==(const rsVector3D<T>& v) { return x == v.x && y == v.y && z == v.z; }
+  bool operator==(const rsVector3D<T>& v) const { return x == v.x && y == v.y && z == v.z; }
 
 
-  // implement dot- and
+  /** Returns the triple product of the 3 vectors a,b,c, defined as: 
+  V = (a x b) * c = a * (b x c) = (b x c) * a = (c x a) * b
+  Its a scalar that gives the signed volume V of the parallelepiped spanned by the 3 vectors. If the 
+  sign is positive, the input vectors form a right handed system, if it negative, they form a left 
+  handed system and if it's zero, they are collinear. */
+  static T tripleProduct(const rsVector3D<T>& a, const rsVector3D<T>& b, const rsVector3D<T>& c)
+  { return dot(cross(a, b), c); }
+  // functions that make sense for n-dimenstional vectors are defined outside the class and those 
+  // that make sense only for a particular dimenstionality are defined inside the class (as static 
+  // functions). reason: those that make sense for any vector can be used in generic code that 
+  // doesn't care about the dimensionality such as in rsParametricCurve
+  // -> so the cross product should be inside the class, too!
+
 
 };
 
@@ -309,21 +328,8 @@ rsVector3D<T> cross(const rsVector3D<T>& a, const rsVector3D<T>& b)
 {
   return rsVector3D<T>(a.y*b.z-a.z*b.y, a.z*b.x-a.x*b.z, a.x*b.y-a.y*b.x); 
 }
+// move into class
 
-/** Returns the triple product of the 3 vectors a,b,c, defined as: 
-V = (a x b) * c = a * (b x c) = (b x c) * a = (c x a) * b
-Its a scalar that gives the volume V of the parallelepiped spanned by the 3 vectors. */
-// not yet tested
-template<class T>
-rsVector3D<T> triple(const rsVector3D<T>& a, const rsVector3D<T>& b, const rsVector3D<T>& c)
-{
-  dot(cross(a, b), c); 
-}
-// rename to rsTripleProduct, maybe move into class - rule: those functions that make sense for 
-// n-dimenstional vectors are defined outside the class and those that make sense only for a 
-// particular dimenstionality are defined inside the class (as static functions). reason: those
-// that make sense for any vector can be used in generic code that doesn't care about the 
-// dimensionality such as in rsParametricCurve
 
 /** Returns the determinant of the matrix that results from writing the 3 given vectors as columns
 into a 3x3 matrix. If this determinant is 0, the 3 vectors are linearly dependent, i.e. one can be 
@@ -334,6 +340,7 @@ T det(const rsVector3D<T>& a, const rsVector3D<T>& b, const rsVector3D<T>& c)
 {
   return a.x*b.y*c.z + b.x*c.y*a.z + c.x*a.y*b.z - c.x*b.y*a.z - b.x*a.y*c.z - a.x*c.y*b.z;
 }
+// isn't that the saem as the triple-product and therefore redundant?
 
 /** Returns the angle between vectors a and b. */
 // not yet tested

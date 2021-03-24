@@ -645,45 +645,19 @@ void ModulatableAudioModule::setupForModulationIfModulatable(Parameter* p)
 void AudioModuleWithMidiIn::handleMidiMessage(MidiMessage message)
 {
   ScopedLock scopedLock(*lock);
-  if( message.isNoteOn() )
-    noteOn(message.getNoteNumber(), message.getVelocity());
-  else if( message.isNoteOff() )
-    noteOff(message.getNoteNumber());
-  else if( message.isAllNotesOff() )
-    allNotesOff();
-  else if( message.isController() )
-    setMidiController(message.getControllerNumber(), (float) message.getControllerValue());
-  else if( message.isPitchWheel() )
-    setPitchBend(message.getPitchWheelValue());
-  else if (message.isAftertouch())
-    setAfterTouch(message.getAfterTouchValue());
-  else if (message.isChannelPressure())
-    setChannelPressure(message.getChannelPressureValue());
+  rsMidiMessageDispatcher::handleMidiMessage(message);
 }
-
-//void AudioModuleWithMidiIn::noteOn(int noteNumber, int velocity)
-//{
-//
-//}
-//
-//void AudioModuleWithMidiIn::noteOff(int noteNumber)
-//{
-//
-//}
-//
-//void AudioModuleWithMidiIn::allNotesOff()
-//{
-//
-//}
 
 void AudioModuleWithMidiIn::setMidiController(int controllerNumber, float controllerValue)
 {
-  ScopedLock scopedLock(*lock);
-  AudioModule::setMidiController(controllerNumber, controllerValue);
+  //ScopedLock scopedLock(*lock); // lock is already held
+  //AudioModule::setMidiController(controllerNumber, controllerValue);
+  ModulatableAudioModule::setMidiController(controllerNumber, controllerValue);
   for(int c = 0; c < (int)childModules.size(); c++)
     childModules[c]->setMidiController(controllerNumber, controllerValue);
 }
 
+/*
 void AudioModuleWithMidiIn::setPitchBend(int pitchBendValue)
 {
   //int dummy = 0;
@@ -694,25 +668,133 @@ void AudioModuleWithMidiIn::setPitchBend(int pitchBendValue)
   //  underlyingRosicInstrument->setPitchBend(wheelValueMapped);
   //}
 }
+*/
 
 //=================================================================================================
 // class AudioModulePoly
 
 AudioModulePoly::AudioModulePoly(CriticalSection *lockToUse, 
-  MetaParameterManager* metaManagerToUse, ModulationManager* modManagerToUse, 
-  rsVoiceManager* voiceManagerToUse) 
+  MetaParameterManager* metaManagerToUse, ModulationManager* modManagerToUse) 
   : AudioModuleWithMidiIn(lockToUse, metaManagerToUse, modManagerToUse) 
 {
-  setVoiceManager(voiceManagerToUse);
+  //setVoiceManager(voiceManagerToUse);
+  // This call to setVoiceManager will not call the subclass implementation of
+  // allocateVoiceResources, it will resolve to the empty baseclass version, see here:
+  // https://stackoverflow.com/questions/14552412/is-it-possible-to-use-the-template-method-pattern-in-the-constructor
+  // "A very good thing to keep in mind in these situations is the old chant "during construction, 
+  // virtual methods aren't". Because in the constructor of the base class, the object is still
+  // considered to be of that base type, and so calls to virtual functions will resolve to the
+  // version implemented for that base class. This is seldom what you want, and If it is pure 
+  // virtual in the base class, it is definitely not what you want."
+
+  // Then, maybe the voiceManager should not be passed to the constructor. Instead, client code
+  // should be forced to call setVoiceManager manually, such that the right version of 
+  // allocateVoiceResources gets called.
 }
 
 void AudioModulePoly::setVoiceManager(rsVoiceManager* managerToUse)
 {
   voiceManager = managerToUse;
-  // todo: maybe loop through child-modules and set the managere there, too
+  allocateVoiceResources();
+  for(int i = 0; i < size(childModules); i++) {
+    AudioModulePoly* pm = dynamic_cast<AudioModulePoly*>(childModules[i]);
+    if(pm)
+      pm->setVoiceManager(voiceManager); }
 }
 
+void AudioModulePoly::addChildAudioModule(AudioModule* moduleToAdd)
+{
+  AudioModuleWithMidiIn::addChildAudioModule(moduleToAdd);
+  AudioModulePoly* pm = dynamic_cast<AudioModulePoly*> (moduleToAdd);
+  if(pm != nullptr)
+    pm->setVoiceManager(voiceManager);
+}
 
+void AudioModulePoly::setMonophonic(bool shouldBeMonophonic)
+{
+  monophonic = shouldBeMonophonic;
+  for(int i = 0; i < getNumParameters(); i++) {
+    Parameter* p = getParameterByIndex(i);            // maybe factor out this sequence of 3 calls
+    ModulatableParameterPoly* mp;                     // its used in the same form in
+    mp = dynamic_cast<ModulatableParameterPoly*>(p);  // noteOnForVoice
+    if(mp)
+      mp->setMonophonic(shouldBeMonophonic); }
+  // ToDo: maybe set the child-modules monophonic, too - but maybe not? Maybe a module should be
+  // able to have any mix of monophonic and polyphonic modules as child modules? maybe have a 
+  // boolean parameter that lets the module optionally set up the child-modules
+}
+
+void AudioModulePoly::noteOn(int key, int vel)
+{
+  // When we receive a noteOn, we assume that the voiceManager has just immediately before that 
+  // also has received the same noteOn. The main module that drives this module (for example, 
+  // ToolChain) is supposed to first set up the voice manager and then pass the event on to the 
+  // child modules. 
+  if(!voiceManager) return; // maybe assert that it's not null
+  int voice = voiceManager->getNewestActiveVoice();
+  jassert(voice >= 0); 
+  // it returns -1 only when there's no active voice but that should never be the case immediately 
+  // after a note-on
+  noteOnForVoice(key, vel, voice);
+}
+
+void AudioModulePoly::noteOnForVoice(int key, int vel, int voice)
+{
+  // For all modulatable parameters that have no modulation connections set up, we call the 
+  // callback for the voice that was allocated for the note, which we assume to be the newest note
+  // in the voiceManager.
+  for(int i = 0; i < getNumParameters(); i++) {
+    Parameter* p = getParameterByIndex(i);
+    ModulatableParameterPoly* mp;
+    mp = dynamic_cast<ModulatableParameterPoly*>(p);
+    if(mp != nullptr && !mp->hasConnectedSources())
+      mp->callCallbackForVoice(voice); }
+  noteOn(key, vel, voice);
+}
+
+void AudioModulePoly::processStereoFrame(double* left, double* right)
+{
+  if(!voiceManager) return;  // maybe assert that it's not null
+
+
+
+  // maybe for optimization, have a boolean flag "needsMonophonicMixdown" (member) to suppress the
+  // mixing of the voices because if several polyphonic modules are chained, the later modules 
+  // actually do not use the mixed signals...or do they? hmmm...well, i guess they may but most 
+  // will not
+
+  double sumL, sumR;  // accumulators, todo: use rsFloat64x2
+  if(monophonic) {
+    // In mono mode, use only output of most recently triggered voice that is still active:
+    int k = voiceManager->getNewestActiveVoice();
+    if(k >= 0)  
+      processStereoFrameVoice(&sumL, &sumR, k); }
+  else {
+    // In poly mode, accumulate outputs of all active voices:
+    int numActiveVoices = voiceManager->getNumActiveVoices();
+    processStereoFramePoly(voicesBuffer, numActiveVoices);
+    sumL = sumR = 0.0;
+    for(int i = 0; i < numActiveVoices; i += 1) {
+      sumL += voicesBuffer[2*i];
+      sumR += voicesBuffer[2*i+1]; }}
+
+  *left  = sumL; // todo: use *left = thruGain * *left + outGain * sumL
+  *right = sumR; // ditto
+}
+
+void AudioModulePoly::processStereoFramePoly(double *buffer, int numActiveVoices)
+{
+  jassert(buffer); 
+  // Must be a valid pointer, length should be at least 2*numActiveVoices, more typically, it will
+  // be 2*voiceManager->getNumActiveVoices()...this is a bit dangerous: we rely on the assumption 
+  // that the buffer is large enough, but don't check that. Maybe provide a means to make that 
+  // safer.
+
+  for(int i = 0; i < numActiveVoices; i+=1) {
+    int k = voiceManager->getActiveVoiceIndex(i);
+    processStereoFrameVoice(&buffer[2*i], &buffer[2*i+1], k); }
+    // we use an interleaved format for easier interfacing with rsFloat64x2
+}
 
 
 //=================================================================================================
@@ -954,7 +1036,7 @@ void AudioModuleEditor::resized()
 
   if( presetSectionPosition != INVISIBLE )
   {
-    int w = setupButton->getX();;
+    int w = setupButton->getX();
     stateWidgetSet->setVisible(true);
     if( Editor::headlineStyle == NO_HEADLINE )
       stateWidgetSet->setBounds(0, 4, w, 16);

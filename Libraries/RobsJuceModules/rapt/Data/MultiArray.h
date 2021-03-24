@@ -60,9 +60,12 @@ public:
   // maybe rename to setExtents...but maybe not - shape seems to be common for that
 
 
-  void fillRandomly(T min = T(0), T max = T(1), int seed = 0)
+  void fillRandomly(T min = T(0), T max = T(1), int seed = 0, bool roundToInt = false)
   {
-    rsArrayTools::fillWithRandomValues(dataPointer, getSize(), min, max, seed);
+    if(roundToInt)
+      rsArrayTools::fillWithRandomIntegers(dataPointer, getSize(), int(min), int(max), seed);
+    else
+      rsArrayTools::fillWithRandomValues(dataPointer, getSize(), min, max, seed);
   }
 
   template<class T2>
@@ -135,6 +138,62 @@ public:
   /** Returns a pointer to the data for read and write access as a flat array. */
   T* getDataPointer() { return dataPointer; }
 
+  /** Returns true, iff all elements ar close to zero within a given tolerance, which is zero by 
+  default. */
+  bool isAllZeros(T tolerance = T(0)) const
+  { return rsArrayTools::isAllZeros(dataPointer, getSize(), tolerance); }
+
+  /** NOT YET READY FOR USE!!
+  Returns true, if the corresponding elements of the arrays x and y are all close to each other
+  up to some tolerance. Elements in one array that have no corresponding element in the other array
+  must be (close to) zero. In this sense, the arrays are assumed to be zero padded as needed. */
+  /*
+  static bool areClosePadded(const rsMultiArrayView<T>& x, const rsMultiArrayView<T>& y, 
+    T tol = T(0))
+  {
+    rsError("This seems to be still buggy - needs unit tests");
+    rsWarning("rsMultiArrayView::areClosePadded not yet tested");
+
+    int R = x.getNumIndices();
+    if(y.getNumIndices() != R)  {
+      rsError("x and y should have the same number of indices");
+      return false;
+    }
+    int size = rsMax(x.getSize(), y.getSize());
+    vector<int> ix(R), iy(R);                    // multiindices into x and y
+    for(int i = 0; i < size; i++)
+    {
+      x.structuredIndices(i, &ix[0]);
+      y.structuredIndices(i, &iy[0]);
+      int jx = x.flatIndexSafe(&ix[0]);          // flat index into x
+      int jy = y.flatIndexSafe(&iy[0]);          // flat index into y
+
+      if(jx == -1 && jy == -1)                   // jx, jy both invalid: nothing to check
+        continue;                                // ...can this actually happen?
+      else if(jx == -1) {
+        if(rsAbs(y.dataPointer[jy]) > tol)       // jx invalid: y[jy] must be zero
+          return false; }
+      else if(jy == -1) {
+        if(rsAbs(x.dataPointer[jx]) > tol)       // jy invalid: x[jx] must be zero
+          return false; }
+      else {                                     // both jx and jy are valid... 
+        T d = x.dataPointer[jx] - y.dataPointer[jy];
+        if(rsAbs(d) > tol)  // ...so x[jx] must match y[jy]
+          return false;  }
+    }
+    return true;
+  }
+  */
+  // nope! that's not how it works! the whole idea with the index structuring and destructuring is
+  // flawed!
+  // needs more tests - compare a 2x3 with a 3x2 matrix
+
+  /** NOT YET READY FOR USE!! */
+  //bool isCloseToPadded(const rsMultiArrayView<T> y, T tolerance = T(0)) const
+  //{ return areClosePadded(*this, y, tolerance); }
+
+
+
 
   //-----------------------------------------------------------------------------------------------
   /** \name Element Access */
@@ -148,6 +207,34 @@ public:
   template<typename... Rest>
   const T& operator()(const int i, Rest... rest) const 
   { return dataPointer[flatIndex(0, i, rest...)]; }
+
+
+  /*
+  template<typename... Rest>
+  T getElementPadded(const int i, Rest... rest) const
+  {
+    int index = flatIndexSafe(0, i, rest...);
+    if(index == -1)
+      return T(0);
+    return dataPointer[index];
+  }
+  */
+  // needs test
+
+
+  T getElementPadded3D(int i, int j, int k, T padding) const
+  {
+    rsAssert(shape.size() == 3, "Must be used only with 3D arrays");
+    if(i < 0 || i >= shape[0] || j < 0 || j >= shape[1] || k < 0 || k >= shape[2]) 
+      return T(0);
+    return (*this)(i, j, k);
+  }
+  // todo: make 1D and 2D versions - these may be more efficient than using the recursive 
+  // implementation for the general case (which is not yet ready)
+  // -maybe make versions that leave out the check against < 0 - typically, this will be ensured 
+  //  already by the caller (when a loop starts at 0), so the checks are superfluous
+  //  maybe name it getElementPaddedRight3D or PaddedHigh or HighPadded or similar
+  
 
 
   /*
@@ -182,6 +269,28 @@ public:
     rsArrayTools::subtract(A.dataPointer, B.dataPointer, C->dataPointer, A.getSize());
   }
 
+
+  static void weightedSum(const rsMultiArrayView<T>& A, T wA, const rsMultiArrayView<T>& B, T wB, 
+    rsMultiArrayView<T>& C)
+  {
+    size_t numDims = C.shape.size();
+    rsAssert(A.shape.size() == numDims && B.shape.size() == numDims);
+    std::vector<int> indices(numDims);
+    C.setToZero();
+    for(int i = 0; i < C.size; i++)
+    {
+      C.structuredIndices(i, &indices[0]);
+      int ia = A.flatIndexSafe(&indices[0]);
+      int ib = B.flatIndexSafe(&indices[0]);
+      if(ia != -1) C.dataPointer[i] += wA * A.dataPointer[ia];
+      if(ib != -1) C.dataPointer[i] += wB * B.dataPointer[ib];
+    }
+  }
+  // needs tests
+  // ..can this be done more efficiently? the computation of the indices array is expensive
+
+
+
   /** Multiplies the two multiarrays element-wise. */
   static void multiply(
     const rsMultiArrayView<T>& A, const rsMultiArrayView<T>& B, rsMultiArrayView<T>* C)
@@ -200,6 +309,9 @@ public:
 
   /** Scales all elements by a given factor. */
   void scale(T factor) { rsArrayTools::scale(dataPointer, getSize(), factor); }
+
+  /** Negates all elements. */
+  void negate() { rsArrayTools::negate(dataPointer, dataPointer, getSize()); }
 
   // maybe factor out common code with rsMatrixView into a class rsArrayView which serves as 
   // baseclass for both - a general "view" class for any sort of array, i.e. homogeneous data 
@@ -255,6 +367,7 @@ protected:
     return index * strides[depth]; 
   }
 
+
   /** Converts a C-array (assumed to be of length getNumDimensions()) of indices to a flat 
   index. */
   int flatIndex(const int* indices) const
@@ -266,8 +379,45 @@ protected:
   }
   // has this been tested?
 
+
+  // Safe versions that check, if all the indices are within their proper range and returns -1, 
+  // if any of them is not:
+  /*
+  template<typename... Rest>
+  int flatIndexSafe(const int depth, const int i, Rest... rest) const
+  {
+    int i1 = flatIndex(depth,   i);
+    int i2 = flatIndex(depth+1, rest...);
+    if(i1 == -1 || i2 == -1)
+      return -1;
+    return i1 + i2;
+  }
+  // needs test
+
+  int flatIndexSafe(const int depth, const int index) const
+  {
+    if(index < 0 || index >= shape[depth])
+      return -1;
+    return index * strides[depth]; 
+  }
+  // recursion base case
+  */
+
+  int flatIndexSafe(const int* indices) const
+  {
+    int fltIdx = 0;
+    for(size_t i = 0; i < strides.size(); i++) {
+      if(indices[i] < 0 || indices[i] >= shape[i])
+        return -1;
+      fltIdx += indices[i] * strides[i]; }
+    return fltIdx;
+  }
+
+
+
+
   /** Converts a flat index into an array of structured/hierarchical indices. */
-  void structuredIndices(int flatIndex, int* indices)
+  void structuredIndices(int flatIndex, int* indices) const
   {
     for(int i = 0; i < getNumIndices(); i++)
     {
@@ -316,16 +466,18 @@ protected:
   //-----------------------------------------------------------------------------------------------
   /** \name Data */
 
-  std::vector<int> shape;    // maybe rename to extents
+  std::vector<int> shape;     // maybe rename to extents
   std::vector<int> strides;
-  T* dataPointer = nullptr;
+  T* dataPointer = nullptr;   // rename to data or pData
   int size = 0;
 
   // todo: get rid of strides, let shape be a non-owned pointer to int, store size of the shapes 
   // array - we want to avoid memory allocations when creating such a view object - creating a view
   // should be cheap! ...actually, we would only need two pointers: data and strides - to support 
   // the () syntax for accessing elements - but then we couldn't check for out-of-range indexes - 
-  // for that, we need also the shape
+  // for that, we need also the shape - use: int numDims; int* shape; int* strides;
+
+
   // or maybe make the number of indices a compile-time parameter, own strides and shape array (as
   // fixed arrays)...implement a constructor that takes an initializer list and copy its content 
   // into our members...but that implies that for each dimensionality, a template will be 
@@ -421,6 +573,14 @@ public:
 
 
   //-----------------------------------------------------------------------------------------------
+  /** \name Inquiry */
+
+  /** Returns true, iff this multiarry has the given shape. */
+  bool hasShape(const std::vector<int>& shape)
+  { return shape == this->shape; }
+
+
+  //-----------------------------------------------------------------------------------------------
   /** \name Operators */
 
   /** Adds two multiarrays element-wise. */
@@ -439,11 +599,17 @@ public:
   rsMultiArray<T> operator/(const rsMultiArray<T>& B) const
   { rsMultiArray<T> C(this->shape); this->divide(*this, B, &C); return C; }
 
+  bool operator==(const rsMultiArray<T>& B) const
+  { return this->shape == B.shape && this->data == B.data; }
+
+  bool operator!=(const rsMultiArray<T>& B) const
+  { return !(*this == B); }
 
 
+  /** Convolves the two arrays x and h which are assumed to be 3-dimensional (i.e. have 3 indices) 
+  and stores the result in y. */
+  static void convolve3D(const rsMultiArray<T>& x, const rsMultiArray<T>& h, rsMultiArray<T>& y);
 
-
-  // todo: ==,!=
 
 
 protected:
@@ -467,5 +633,27 @@ protected:
 template<class T>
 inline rsMultiArray<T> operator*(const T& s, const rsMultiArray<T>& A)
 { rsMultiArray<T> B(A); B.scale(s); return B; }
+
+template<class T>
+void rsMultiArray<T>::convolve3D(const rsMultiArray<T>& x, const rsMultiArray<T>& h, 
+  rsMultiArray<T>& y)
+{
+  rsAssert(x.getNumIndices() == 3 && h.getNumIndices() == 3, "x and h must be 3-dimensional");
+  int Lx = x.getExtent(0), Mx = x.getExtent(1), Nx = x.getExtent(2);
+  int Lh = h.getExtent(0), Mh = h.getExtent(1), Nh = h.getExtent(2);
+  int Ly = Lx + Lh - 1,    My = Mx + Mh - 1,    Ny = Nx + Nh - 1;
+  y.setShape({Ly, My, Ny});
+  for(int l = 0; l < Ly; l++) {
+    for(int m = 0; m < My; m++) {
+      for(int n = 0; n < Ny; n++) {
+        T s = T(0);
+        for(int i = rsMax(0, l-Lx+1); i <= rsMin(Lh-1, l); i++) {
+          for(int j = rsMax(0, m-Mx+1); j <= rsMin(Mh-1, m); j++) {
+            for(int k = rsMax(0, n-Nx+1); k <= rsMin(Nh-1, n); k++) {
+              s += h(i, j, k) * x(l-i, m-j, n-k); }}}
+        y(l, m, n) = s; }}}
+}
+// How can general nD convolution be implemented?
+
 
 #endif

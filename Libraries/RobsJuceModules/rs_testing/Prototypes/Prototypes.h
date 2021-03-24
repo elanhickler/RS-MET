@@ -42,7 +42,34 @@ static constexpr int firstBitOnly = allBits ^ allBitsButFirst;          // only 
 //static size_t allBitsButFirst= allBits ^ firstBitOnly;
 */
 
+template<class T>
+void weightedSum(const T* x1, int N1, T w1, const T* x2, int N2, T w2, T* y, int Ny)
+{
+  int n = 0;
 
+  while(n < rsMin(N1, N2, Ny)) {
+    y[n] = w1 * x1[n] + w2 * x2[n];
+    n++; }
+
+  if(n == Ny)
+    return;
+
+  // handle overhanging part in x1 or x2:
+  if(N1 > N2) {
+    while(n < rsMin(N1, Ny)) {
+      y[n] = w1 * x1[n];
+      n++; }}
+  else if(N2 > N1) {
+    while(n < rsMin(N2, Ny)) {
+      y[n] = w2 * x2[n];
+      n++; }}
+
+  // handle trailing zeros in result, if necessarry:
+  while(n < Ny) {
+    y[n] = T(0);
+    n++; }
+}
+// todo: document, write test, move into rsArrayTools
 
 /** Solves a pentadiagonal linear system of equations with given diagonals and right-hand side
 using a simple algorithm without pivot-search. lowerDiag1 is the one directly below the main
@@ -791,6 +818,253 @@ protected:
 
 //=================================================================================================
 
+/** Extends rsQuantileFilter by producing a pseudo-resonance signal formed by... */
+
+template<class T>
+class rsQuantileFilterResonant : public rsQuantileFilter<T>
+{
+
+public:
+
+  using Base = rsQuantileFilter<T>;
+
+  rsQuantileFilterResonant()
+  {
+    //resoHighpass.setMode(rsOnePoleFilter<T,T>::HIGHPASS_MZT);
+    resoHighpass.setMode(rsStateVariableFilter<T,T>::HIGHPASS);
+    allocateResources();
+    Base::dirty = true;
+  }
+
+  //-----------------------------------------------------------------------------------------------
+  /** \name Setup */
+
+  /** Sets the sample rate at which this filter should operate. May re-allocate memory. */
+  void setSampleRate(T newSampleRate)
+  {
+    sampleRate = newSampleRate;
+    allocateResources();
+    resoHighpass.setSampleRate(sampleRate);
+    Base::dirty = true;
+  }
+
+  /** Sets the maximum length (in seconds) for this filter. May re-allocate memory. */
+  void setMaxLength(T newMaxLength)
+  {
+    maxLength = newMaxLength;
+    allocateResources();
+    Base::dirty = true;
+  }
+
+  /** Sets sample rate and maximum length at the same time. May re-allocate memory. This may avoid
+  some re-allocations compared to using setSampleRate followed by setMaxLength (or vice versa), 
+  depending on the situation - so, if possible, it's recommended to set both at the same time. */
+  void setSampleRateAndMaxLength(T newSampleRate, T newMaxLength)
+  {
+    sampleRate = newSampleRate;
+    maxLength  = newMaxLength;
+    allocateResources();
+    Base::dirty = true;
+  }
+
+  void setResonanceMix(T newMix)
+  {
+    resoMix = newMix;
+  }
+  // maybe use a resoGain instead
+
+  /*
+  enum class ResoMode
+  {
+
+
+  };
+  */
+
+
+  //-----------------------------------------------------------------------------------------------
+  /** \name Processing */
+
+  /** Produces one output sample from a given input sample. */
+  T getSample(T x)
+  {
+    delayLine.getSample(x);
+    if(dirty) 
+      updateInternals();
+    T yL = core.getSample(x);                   // lowpass part
+    T yD = delayLine[delayScl*delay];           // delayed input
+    T yH = yD - yL;                             // highpass part
+    T yF = loGain * yL + hiGain * yH;           // non-resonant filtered output
+    T yR = getResonance(x, yL, yD);             // (pseudo) resonance
+    return (T(1)-resoMix) * yF + resoMix * yR;  // crossfade between non-resonant and resonance
+  }
+  // maybe factor out a function to produce lowpass and highpass getSampleLoHi or something at the
+  // same time - client code may find that useful - or maybe getOutputs to be consistent with
+  // rsStateVariableFilter
+
+  /** Resets the filter into its initial state. */
+  void reset()
+  {
+    Base:reset();
+    minCore.reset();
+    maxCore.reset();
+    bandpass.reset();
+    resoHighpass.reset();
+  }
+
+  /** Updates the internal algorithm parameters and embedded objects according to the user
+  parameters. This is called in getSample, if the state is dirty but sometimes it may be
+  convenient to call it from client code, too. */
+  virtual void updateInternals()
+  {
+    double L = length*sampleRate;
+    core.setLengthAndQuantile(   L, quantile);
+
+    minCore.setLengthAndQuantile(L, T(0));
+    maxCore.setLengthAndQuantile(L, T(1));
+    //minCore.setLengthAndQuantile(100, T(0));
+    //maxCore.setLengthAndQuantile(100, T(1));
+    //minCore.setLengthAndQuantile(rsMax(L, 10.0), T(0));
+    //maxCore.setLengthAndQuantile(rsMax(L, 10.0), T(1));
+
+
+    delay = T(0.5)*(L-1);
+
+    T f = getFrequency();
+
+    //T w = T(2*PI)*sampleRate/length; // == 2*PI*sampleRate*frequency
+    T w = T(2*PI) * f  / sampleRate; // == 2*PI*frequency/sampleRate
+    bandpass.setFrequencyAndAbsoluteBandwidth(w, T(0.00001));  // preliminary
+    // todo: let the resonance frequency have an adjustable pitch-offset with respect to core 
+    // filters...maybe the min/max cores could have an offset as well
+    // and maybe we should use a power rule to generalize from constant absolute bandwidth (0) and
+    // constant relative bandwidth (1) to anything between and beyond...and we generally need a 
+    // reasonable user-parameter to control the bandwidth
+
+    //T gain = bandpass.getMagnitudeAt(w);  // excluding the output gain
+    //bandpass.setOutputGain(T(1)/gain);
+    // for test/debug 
+    // -gain tends to get huge for small bandwidths (seems to be in reciprocal 
+    //  relationship)! 
+    // -todo: plot impulse response
+
+    //T fHp = rsMax(T(0), 0.9*f - T(1000));
+    T fHp = rsMax(T(0), 0.5*f);
+    //resoHighpass.setCutoff(fHp);
+    resoHighpass.setFrequency(fHp);
+
+
+    dirty = false;
+  }
+
+
+
+protected:
+
+  /** Computes the pseudo-resonance signal. Inputs are the filter input x, the "lowpass" quantile
+  filter output yL and the delayed input yD (rename to xD) which are used to generate the 
+  resonance. */
+  T getResonance(T x, T yL, T yD)
+  {
+    T min  = minCore.getSample(x);
+    T max  = maxCore.getSample(x);
+
+    // this computation should be factored out and we should provide various different ways to
+    // compute wMin/wMax that can bew switched by the user using a setResonanceMode function:
+    T wMin, wMax;
+    wMin = 0;                              // preliminary.. maybe these should be members and 
+    wMax = 0;                              // computed in updateinternals
+
+    //if(yD >= yL) wMax = 1;
+    //else         wMin = 1;
+
+    // this is not a very good way to compute wMin/wMax - it should use some condition that is 
+    // likely to cause a switch once per cycle, i.e. on the avarage switches once within a length
+    // of the filter buffer. this condition here switches far too often - try several things
+    // ...oh - but maybe that's just because the input is white noise - if it's somewhat lowpassed
+    // noise, i may be better
+
+    computeMinMaxWeights(&wMin, &wMax, x, yL, yD, min, max);
+    T yR = wMin*min + wMax*max;
+
+    // experimental - highpass and amplify the resonance to counteract resonance loss at high 
+    // cutoff frequencies:
+    yR  = resoHighpass.getSample(yR);
+    T a = T(1);    // preliminary - should later depend on cutoff in some way
+
+    // experimental:
+    T p = 2*getFrequency()/sampleRate;  // 0..1 as f goes 0..fs
+    //p = 1-p; p = p*p; a = 1 / (0.1 + p);
+    //p = cos(0.5*PI*p); a = 1 / (0.1 + p);
+    p = 1-sin(0.5*PI*p); a = 1 / (0.1 + p);
+    // todo: figure out the best shape
+
+
+    return a*yR;
+  }
+
+  void computeMinMaxWeights(T* wMin, T* wMax, T x, T yL, T yD, T yMin, T yMax)
+  {
+    T yB = bandpass.getSample(yD);  // or maybe feed x
+
+    T thresh = T(0.0) * yL;
+    //T thresh = T(0.2) * rsMax(rsAbs(yMin), rsAbs(yMax));
+    // make user-adjustable, determines pulse-width, should perhaps be scaled by yL...and maybe we
+    // should normalize the amplitude of the bandpass with respect to the bandwidth (we probably 
+    // want a constant peak gain bandpass - maybe the RBJ bandpass is good for that)
+    // ...it should take into account the magnitude of the bandpass output which may be a function
+    // of the bandwidth - we shoould normalize everything such that thresholds between -1..+1 make
+    // sense and have the same effect regardless of input volume and bandwidth setting
+
+    T a = T(1);  // scaler to control the resonance amplitude
+    T f = getFrequency();
+    //a = 10 / length;
+    //a = T(1) + T(4)*rsClip(f / T(20000), T(0), T(1)); 
+    // yes, we need a factor, but we also need a highpass, otherwise we just amplify noise
+    // maybe the highpass freq should be something like max(0, cutoff-2000) such that the highpass
+    // sets in above 2kHz cutoff an is tuned 2kHz below the cutoff...of maybe use 
+    // max(0, 0.5*cutoff-2000) or something - tweak the factor and offset to taste
+
+    if(yB >= thresh) { *wMin = T(0); *wMax = a;    }
+    else             { *wMin = a;    *wMax = T(0); }
+    // maybe instead of hard-switching, we can make a sort of soft-switch?
+
+
+    /*
+    if(yD >= yL) { *wMin = T(0); *wMax = T(1); }
+    else         { *wMin = T(1); *wMax = T(0); }
+    */
+  }
+
+  virtual void allocateResources() override
+  {
+    Base::allocateResources();
+    int mL = getMaxRequiredLengthInSamples();
+    minCore.setMaxLength(mL);
+    maxCore.setMaxLength(mL);
+  }
+
+  // filter cores to extract min and max:
+  rsQuantileFilterCore2<T> minCore, maxCore;
+  // can this be done more efficiently? i could perhaps use the rsMovingMinMaxFilter class but 
+  // then the length would not be modulatable and i don't think it's easy to make it modulatable
+
+  T resoMix = T(0);
+
+  rsTwoPoleFilter<T, T> bandpass;
+  // the two-pole is actually not really a bandpass but a resonator - maybe an RBJ bandpass is 
+  // better?
+
+  //rsOnePoleFilter<T, T> resoHighpass;
+
+  rsStateVariableFilter<T, T> resoHighpass;
+
+};
+
+
+
+//=================================================================================================
+
 /** This is a naive implementation of (the core of) a moving quantile filter and meant only for
 producing test outputs to compare the production version of the rsQuantileFilterCore against.
 It's horribly inefficient - the cost per sample is O(N*log(N)) whereas the production version
@@ -867,6 +1141,86 @@ protected:
   int nS = 0, nL = 0;    // maybe use size_t
 
 };
+
+
+//=================================================================================================
+
+/** This is a naive implementation of a "filter" that minimizes the distance between subsequent 
+samples by re-ordering them. It always keeps a buffer of N samples from the past and when a new 
+sample comes in, it replaces one of the buffered samples with the new one and the replaced sample 
+from the buffer is used as output. Which one is replaced and used as output is one that is closest 
+to the previous output sample. In the special case that the current input is closer to the previous
+output than all buffered samples, it will be used as output and the buffer will left alone. */
+
+template<class T>
+class rsDistanceFilterNaive
+{
+
+public:
+
+  void setLength(int newLength)
+  {
+    buf.resize(newLength);
+    rsFill(buf, T(0));
+  }
+  // O(N)
+
+  T getSample(T x)
+  {
+    T   dMin = rsAbs(y - x);
+    int iMin = -1;
+    for(int i = 0; i < (int) buf.size(); i++) {
+      T d = rsAbs(y - buf[i]);
+      if(d < dMin) {
+        dMin = d;
+        iMin = i; }}
+
+    if(iMin != -1) {
+      y = buf[iMin];
+      buf[iMin] = x; }
+    else
+      y = x;
+
+    return y;
+  }
+  // O(N)
+
+  void reset()
+  {
+    rsFill(buf, T(0));
+    y = T(0);
+  }
+  // O(N)
+
+protected:
+
+  std::vector<T> buf;     // buffer of stored samples
+  T y = T(0);             // old output
+
+};
+// ..not yet tested
+// todo:
+// -implement this more efficiently using a heap: 
+//  -we need a heap-search procedure which should run in log(N) time): int heap.findClosest(T x)
+//  -this should be used to determine the sample to be replaced, replacement itself will also take
+//   O(log(N)), so the overall complexity of getSample will be O(log(N))
+//  ...oh - no, maybe a heap will not work and we need a binary search tree instead
+// -use it to filter uniform white noise - it should preserve the uniform amplitude distribtion
+//  while still imposing a correlation (that was actually the question that lead to the idea: how 
+//  can we produce correlated noise with uniform amplitude distribution - because regular filters
+//  tend to gaussianize it)
+// -the naive version could generalize to other distance measures such as 2D Euclidean distance
+//  for stereo signal - unfortunatley, i don't see, how this could be made efficient using a heap 
+//  because there's no natural ordering for 2D vectors...but maybe one could be invented...but it 
+//  should be related to distance between pairs of vectors
+
+// ...how else could we impose correlations (and therefore, some sort of not-flat frequency 
+// spectrum) without modifying the amplitude distribution? the amplitude distribution can be 
+// modified by waveshaping and correlations can be introduced by filtering - so maybe a filtering
+// process (like 2 or 3 point MA) can be used to spectrally shape the noise, which also turns a 
+// uniform distribtuion into triangular or parabolic and then that can be followed by waveshaper 
+// that counteracts this change (square? cube? sqrt?, cbrt?) ...or maybe it should be the 
+// (inverse of?) the integral of the resulting distribution
 
 //=================================================================================================
 
@@ -1079,8 +1433,682 @@ protected:
 
 };
 
+//=================================================================================================
+
+/** A class for representing and performing computations with sparse matrices which are matrices in 
+which most elements are zero. This implementation uses a std::vector of "elements" where each 
+element stores its row- and column-indices and the actual value. */
+
+template<class T>
+class rsSparseMatrix
+{
 
 
+public:
+
+  // todo: provide a (subset of) the same interface as rsMatrix(View)...maybe it's a good idea to 
+  // keep the interface small to make it easier to provide different implementations with different
+  // storage modes with the same interface that can be benchmarked against each other.
+
+  rsSparseMatrix() {}
+
+  rsSparseMatrix(int numRows, int numColumns)
+  {
+    rsAssert(numRows >= 1 && numColumns >= 1);
+    this->numRows = numRows;
+    this->numCols = numColumns;
+  }
+
+  //-----------------------------------------------------------------------------------------------
+
+  /** Returns the number of nonzero elements in this matrix. */
+  int getNumElements() const { return (int) elements.size(); }
+
+  int getNumRows() const { return numRows; }
+
+  int getNumColumns() const { return numCols; }
+
+
+
+  bool isValidIndexPair(int i, int j) const 
+  { return i >= 0 && i < numRows && j >= 0 && j < numCols; }
+
+
+  /** Returns the diagonal part D of this matrix A, such that A = D + N (where N is the 
+  non-diagonal part). Diagonal part means that only the diagonal elements are included, the others
+  are set to zero, i.e. left out. */
+  rsSparseMatrix<T> getDiagonalPart() const
+  {
+    rsSparseMatrix<T> D(numRows, numCols);
+    for(size_t k = 0; k < elements.size(); k++)
+      if(elements[k].i == elements[k].j)
+        D.set(elements[k].i, elements[k].j, elements[k].value);
+    return D;
+  }
+  // maybe this should return a vector instead of a sparse matrix, maybe make a function that 
+  // splits A into diagonal and non-diagonal at once: splitOutDiagonalPart(Vec& D, Mat& N)
+
+  /** Returns the diagonal part N of this matrix A, such that A = D + N (where D is the 
+  diagonal part). */
+  rsSparseMatrix<T> getNonDiagonalPart() const
+  {
+    rsSparseMatrix<T> N(numRows, numCols);
+    for(size_t k = 0; k < elements.size(); k++)
+      if(elements[k].i != elements[k].j)
+        N.set(elements[k].i, elements[k].j, elements[k].value);
+    return N;
+  }
+
+
+  //-----------------------------------------------------------------------------------------------
+  /** \name Accessors. Element access via these is slow, so they should probably be only used, when 
+  a matrix is built once and for all as a precomputation. When the matrix is used later e.g. in an
+  iterative linear solver, you will probably want to use more efficient functions like product. */
+
+  /** Read access. */
+  T operator()(int i, int j) 
+  { 
+    Element e(i, j, T(0));
+    if(elements.empty()) 
+      return T(0);
+    size_t k = (size_t) rsArrayTools::findSplitIndex(&elements[0], getNumElements(), e);
+    if(k >= elements.size() || e < elements[k])
+      return T(0);
+    else
+      return elements[k].value;
+  }
+
+  /** Sets the element at position (i,j) to the given new value. This may lead to insertion of a 
+  new element (if there's no element yet at i,j) or removal of existing elements (if val is 
+  zero). */
+  void set(int i, int j, T val) 
+  { 
+    rsAssert(isValidIndexPair(i, j), "Index out of range");
+    Element e(i, j, T(val));
+    if(elements.empty() && val != T(0)) {
+      elements.push_back(e);
+      return;  }
+    size_t k = (size_t) rsArrayTools::findSplitIndex(&elements[0], getNumElements(), e);
+    if((k >= elements.size() || e < elements[k]) && val != T(0))
+      rsInsert(elements, e, k);
+    else {
+      if(val != T(0))
+        elements[k] = e;
+      else
+        rsRemove(elements, k); }
+  }
+  // todo: element removal needs tests
+
+
+  //-----------------------------------------------------------------------------------------------
+
+  /** Computes the matrix-vector product y = A*x where x must be numCols long and y must be numRows 
+  long. The complexity is O(N+K) where N is the number of rows and K is the number of nonzero 
+  elements. */
+  void product(const T* x, T* y) const
+  {
+    rsAssert(x != y, "Can't be used in place");
+    for(int j = 0; j < numRows; j++)
+      y[j] = T(0);
+    for(size_t k = 0; k < elements.size(); k++)
+      y[elements[k].i] += elements[k].value * x[elements[k].j];
+  }
+  // -maybe include optional strideX, strideY parameters - or maybe implement a separate function with
+  //  strides
+  // -how can we implement the product with the transposed matrix? would it be
+  //    y[elements[k].j] += elements[k].value * x[elements[k].i];
+
+
+  /** Computes the matrix-vector product y = A*x and returns the maximum absolute value of the 
+  change in y before and after the call. This is supposed to be used inside vector iterations of
+  the form yNew = A * yOld, where y takes the role of yNew and x the role of yOld. This implies 
+  that x and y must have the same dimensionality which in turn means the matrix A must be square. 
+  The return value can be used in a convergence test. If x and y are the same, i.e. the function is
+  applied in place, the returned y vector will actually not be the matrix-vector product A*x 
+  because in the computations of the values with higher index, it will use already updated values 
+  with lower index. That may seem undesirable from a mathematical cleanliness point of view, but in
+  practice, that may actually speed up convergence (see Jacobi- vs Gauss-Seidel iteration - it's a 
+  similar situation here). So, it can be used in place in such a context - just don't expect the 
+  computed y to be the exact matrix-vector product then. (todo: test, if it really improves 
+  convergence - i just assume it because of the similarity to Gauss-Seidel) */
+  T iterateProduct(const T* x, T* y) const;
+  // may not be needed
+
+
+  // todo: maybe implement matrix-operators +,-,*. Such operations should result in another 
+  // (possibly less) sparse matrix. A naive algorithm for addition can use element access and set. 
+  // I think, this will have complexity O(N*M*(log(K1)+log(K2))) where N,M are number of rows and 
+  // columns and K1, K2 are the numbers of nozero elements in operands 1 and 2. I think, it's 
+  // possible to do in O(K1 + K2) or maybe O(K1*log(K1) + K2*log(K2))...or something. Maybe the 
+  // naive algo should be part of the test-suite but not the class itself.
+
+
+  // maybe move into class rsSparseLinearAlgebra to not overload this class
+
+  /** Given the diagonal part D and non-diagonal part N of a matrix A, such that A = D + N, this 
+  function solves the linear system A*x = (D+N)*x = b via Gauss-Seidel iteration and returns the 
+  number of iterations taken. The resulting solution vector will be written into x. Whatever is 
+  stored in the vector x before the call will be taken as initial guess. For the iteration to 
+  converge, the matrix A must be strictly diagonally dominant. That means the diagonal element on 
+  each row must have larger absolute value than the sum of the absolute values of the off-diagonal
+  elements in the same row. 
+  https://en.wikipedia.org/wiki/Gauss%E2%80%93Seidel_method
+  https://en.wikipedia.org/wiki/Diagonally_dominant_matrix   */
+  static int solveGaussSeidel(const rsSparseMatrix<T>& D, const rsSparseMatrix<T>& N, T* x, 
+    const T* b, T tol);
+
+  /** Convenience function that takes the matrix A and splits it internally into diagonal and 
+  non-diagonal parts. This is slow, so it should be used only in testing. In production code, the 
+  splitting can typically be done once and for all as pre-processing step. */
+  static int solveGaussSeidel(const rsSparseMatrix<T>& A, T* x, const T* b, T tol)
+  { return solveGaussSeidel(A.getDiagonalPart(), A.getNonDiagonalPart(), x, b, tol); }
+  // maybe make it non-static, to be called like A.solveGaussSeidel
+
+
+  /**
+  https://en.wikipedia.org/wiki/Successive_over-relaxation
+  needs a workspace of size N, becomes Gauss-Seidel for w = 1 and Jacobi for w = 0.  */
+  static int solveSOR(const rsSparseMatrix<T>& D, const rsSparseMatrix<T>& N, T* x, 
+    const T* b, T tol, T* workspace, T w);
+
+  static int solveSOR(const rsSparseMatrix<T>& A, T* x, const T* b, T tol, T* workspace, T w)
+  { return solveSOR(A.getDiagonalPart(), A.getNonDiagonalPart(), x, b, tol, workspace, w); }
+
+
+protected:
+
+  /** Given a matrix position with row- and column-indices i,j, this function either returns the 
+  flat index k at which the element is found in our elements array or, if it's not found, the index
+  at which that element should be inserted. */
+  /*
+  int flatIndex(int i, int j)
+  {
+
+    return 0;  // preliminary
+    // todo: do a binary search for element at position i,j, return its the flat index k if 
+    // present, otherwise return the place where this element should be inserted
+  }
+  */
+
+  struct Element
+  {
+    int i, j;   // row and column index
+    T value;
+
+    Element(int row, int col, T val) { i = row; j = col; value = val; }
+
+    /** The less-than operator compares indices, i.e. a < b, iff a is supposed to be stored before 
+    b in our elements array. The actual stored value plays no role in this comparison. This may 
+    seem weird but it is just what is needed for the binary search (which uses the operator) that 
+    is used in element access. ...todo: try to find a more elegant solution. */
+    bool operator<(const Element& b) const
+    {
+      if(i   < b.i) return true;
+      if(b.i <   i) return false;
+      if(j   < b.j) return true;   // i == b.i, compare with respect to j
+      return false;
+    }
+  };
+
+
+  int numRows = 0, numCols = 0;  // number of rows and columns - maybe try to get rid
+  
+  std::vector<Element> elements;
+
+
+};
+
+// ToDo: 
+// -Make another implementation (with the same interface) that stores rows. This saves one 
+//  integer of storage space per entry because the row index is given implicitly. Maybe make a 
+//  column-wise version, too - but that's less useful because with row-wise storage, it's more 
+//  convenient and efficient to execute matrix-vector multiplications which is the most important 
+//  operation in iterative linear solvers, which are the main application of sparse matrices.
+// -Maybe templatize also on the integer type used for indices i,j. Users may want to use short
+//  integers (16 bit) to save even more storage space, especially when T is float because then 
+//  one entry is exactly 64 bits long). Maybe use TIdx, TVal for the two template parameters.
+// -make a class rsSparseTensor
+
+template<class T>
+T rsSparseMatrix<T>::iterateProduct(const T* x, T* y) const
+{
+  rsAssert(numRows == numCols, "Can be used only for square matrices");
+  size_t k = 0;
+  T dMax = T(0);
+  while(k < elements.size())
+  {
+    size_t i = elements[k].i;
+    T yi = T(0);
+    while(k < elements.size() && elements[k].i == i) {
+      yi += elements[k].value * x[elements[k].j];
+      k++; }
+    T dyi = y[i] - yi;
+    dMax = rsMax(dMax, rsAbs(dyi));
+    y[i] = yi; 
+  }
+  return dMax;
+}
+// this function may not be that useful after all, maybe remove it (or put it into some sort of 
+// code-attic)
+
+template<class T>
+int rsSparseMatrix<T>::solveGaussSeidel(
+  const rsSparseMatrix<T>& D, const rsSparseMatrix<T>& C, T* x, const T* b, T tol)
+{
+  size_t N = (size_t) D.numRows;
+  rsAssert(D.numCols == N); // the matrices D,C must be square and have the same shape
+  rsAssert(C.numRows == N);
+  rsAssert(C.numCols == N);
+  int numIts = 0;
+  while(true) {
+
+    // Perform one Gauss-Seidel step and record the maximum change in the value in any of the
+    // elements in vector x:
+    size_t k = 0;
+    T dMax = T(0);
+    for(size_t i = 0; i < N; i++) {
+      T xi = b[i];  // xi will become the new, updated value for x[i]
+      while(k < C.elements.size() && C.elements[k].i == i)  {
+        xi -= C.elements[k].value * x[C.elements[k].j];
+        k++;
+      }
+      xi /= D.elements[i].value;
+      T dxi = x[i] - xi;
+      dMax = rsMax(dMax, rsAbs(dxi));
+      x[i] = xi; 
+    }
+
+    // Increment iteration counter and check convergence criterion:
+    numIts++;
+    if(dMax <= tol)
+      break;
+  }
+
+  return numIts;
+}
+// todo: can the internal step be expressed using C.product(x, x) - this would be nice for 
+// generalizing the algo to other implementations of sparse matrices...but it may be hard to keep
+// track of the dMax
+
+template<class T>
+int rsSparseMatrix<T>::solveSOR(const rsSparseMatrix<T>& D, const rsSparseMatrix<T>& C, T* x,
+  const T* b, T tol, T* wrk, T w)
+{
+  size_t N = (size_t) D.numRows;
+  int numIts = 0;
+  while(true)
+  {
+    // Perform one iteration of SOR and record the maximum change in the value in any of the
+    // elements in vector x:
+    for(size_t i = 0; i < N; i++)
+      wrk[i] = x[i];
+
+    size_t k = 0;
+    T dMax = T(0);
+    for(size_t i = 0; i < N; i++)
+    {
+      T xi = b[i];  // xi will become the new, updated value for x[i]
+      while(k < C.elements.size() && C.elements[k].i == i) 
+      {
+        T xOld = wrk[C.elements[k].j];
+        T xNew = x[  C.elements[k].j];
+        xi -= C.elements[k].value * (w * xNew + (T(1)-w) * xOld);
+        k++;
+      }
+      xi /= D.elements[i].value;
+      T dxi = x[i] - xi;
+      dMax = rsMax(dMax, rsAbs(dxi));
+      x[i] = xi;
+    }
+
+    // Increment iteration counter and check convergence criterion:
+    numIts++;
+    if(dMax <= tol)
+      break;
+  }
+
+  return numIts;
+}
+
+//=================================================================================================
+
+/** A class that implements iterative algorithms for numerical linear algebra. It is written in
+such a way that the same code can be used with dense or sparse matrices or any other kind of 
+special matrix, as long as some appropriate low-level functions are added to this class for the
+specific matrix-types. These low-level functions include things like retrieving the shape and for
+computing matrix-vector or matrix-matrix products. These low-level special purpose implementations 
+(one for each special matrix class) will then be used inside the actual computational algorithms 
+which themselves will be the same for all the different matrix classes. If you want to use the 
+algorithms for some new special matrix class, you will need to add just a small amount of 
+boilerplate code for these operations - either here in the class or as global functions. */
+
+class rsIterativeLinearAlgebra
+{
+
+public:
+
+  template<class T, class TMat>
+  static int largestEigenValueAndVector(const TMat& A, T* val, T* vec, T tol, T* workspace);
+  // maybe rename to vonMisesIteration or eigenViaVonMises/eigenViaPowerIteration
+
+  template<class T, class TMat>
+  static int eigenspace(const TMat& A, T* vals, T* vecs, T tol, T* workspace);
+  // each eigenvector is found in turn from the largest to the smallest via a variation of the von 
+  // Mises iteration in which the projection of the iterates onto the already found eigenspace is
+  // subtracted from the iterates
+  // returns the maximum number of iterations, i.e. the number of iteration for the eigenvector 
+  // that took the most iterations...hmm - or maybe it should return the sum of all iterations
+  // -maybe it should take an additional parameter to specify, how many eigenpairs should be found
+  //  and also a maximum number of iterations
+
+
+  // Specializations of some low-level functions for sparse matrices (boilerplate):
+  template<class T> static void product(const rsSparseMatrix<T>& A, const T* x, T* y) { A.product(x, y); }
+  template<class T> static int numRows(const rsSparseMatrix<T>& A) { return A.getNumRows(); }
+  template<class T> static int numColumns(const rsSparseMatrix<T>& A) { return A.getNumColumns(); }
+
+  // todo: implement:
+  // https://en.wikipedia.org/wiki/Conjugate_gradient_method
+  // https://en.wikipedia.org/wiki/Biconjugate_gradient_method
+  // https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method
+
+};
+
+template<class T, class TMat>
+int rsIterativeLinearAlgebra::largestEigenValueAndVector(
+  const TMat& A, T* val, T* vec, T tol, T* wrk)
+{
+  rsAssert(numRows(A) == numColumns(A), "Can be used only for square matrices");
+  using AT = rsArrayTools;
+  int N = numRows(A);
+  T L = AT::euclideanNorm(vec, N);
+  AT::scale(vec, N, T(1) / L);
+  int numIts = 0;
+  while(true) {
+    product(A, vec, wrk);
+    L = AT::euclideanNorm(wrk, N);
+    AT::scale(wrk, N, T(1) / L);
+    T dMax = AT::maxDeviation(vec, wrk, N);
+    if(dMax <= tol) {
+      *val = L;                          // that's only the absolute value...
+      int i = AT::maxAbsIndex(vec, N);
+      if(vec[i] * wrk[i] < T(0))         // ...this figures out the sign
+        *val = -(*val);
+      AT::copy(wrk, vec, N);             // return the last iterate, not the 2nd to last
+      break; }
+    AT::copy(wrk, vec, N);
+    numIts++; }
+  return numIts;
+}
+// This implements the von Mises vector iteration.
+// https://en.wikipedia.org/wiki/Power_iteration
+
+// ToDo:
+// -try using the maximum norm instead of the Euclidean - may be numerically more precise due to 
+//  involving less arithmetic (none, actually)
+// -maybe rename to MisesIteration
+// -maybe include a maxNumIterations parameter
+// -maybe factor out the stuff below product, such that the compiled version of this code can be 
+//  re-used for dense matrices (to reduce binary size)..maybe into a normalizeAndTest function
+//  that returns a boolean, the copy inside the if can be dragged outside the while(true) loop
+// -try to come up with an in-place iteration like Gauss-Seidel - but it must take care to not
+//  use the updated values as is but scale them by the current stimate of the eigenvalue, because 
+//  the next iterate is expected to be scaled by the eigenvalue in the iteration - so the summation
+//  loop need to be split inot two halfs: one with the scaling (using the updated values) and one 
+//  without (using the old values)
+// -try to find all eigenvalues and -vectors by subtracting the projection onto the already found
+//  eigenspace from each iterate - this should be done right after product(vec, wrk); i think
+
+template<class T, class TMat>
+int rsIterativeLinearAlgebra::eigenspace(const TMat& A, T* vals, T* vecs, T tol, T* wrk)
+{
+  // Algorithm:
+  // It works like the von Mises vector iteration for one eigenvector at the time, from large to 
+  // small. To avoid converging to the same eigenvector again, instead of just forming the 
+  // matrix-vector product of the matrix with the previous iterate, we subtract from that product 
+  // the projection of it onto the space spanned by the already previously found eigenvectors.
+
+  rsAssert(numRows(A) == numColumns(A), "Can be used only for square matrices");
+  using AT = rsArrayTools;
+
+  T (*norm)(const T*, int) = &AT::euclideanNorm;
+  //T (*norm)(const T*, int) = &AT::maxAbs;
+  // i think, any norm should work, but maxAbs apparently doesn't - why?
+
+  int N = numRows(A);
+  int numIts = 0;
+  for(int n = 0; n < N; n++) {        // loop over the eigenvectors
+    T* val = &vals[n];                // location of n-th eigenvalue
+    T* vec = &vecs[n*N];              // start location of n-th eigenvector
+    //T L = AT::euclideanNorm(vec, N);
+    T L = norm(vec, N);
+    AT::scale(vec, N, T(1) / L);
+    while(true) {
+      product(A, vec, wrk);
+      for(int i = 0; i < n; i++) {
+        T pi = T(0);
+        for(int j = 0; j < N; j++) pi += wrk[j] * vecs[i*N + j];   // compute projection coeff
+        for(int j = 0; j < N; j++) wrk[j] -= pi * vecs[i*N + j]; } // subtract projection
+      //L = AT::euclideanNorm(wrk, N);
+      L = norm(wrk, N);
+      AT::scale(wrk, N, T(1) / L);
+      T dMax = AT::maxDeviation(vec, wrk, N);
+      if(dMax <= tol) {
+        *val = L;
+        int i = AT::maxAbsIndex(vec, N);
+        if(vec[i] * wrk[i] < T(0)) 
+          *val = -(*val);
+        AT::copy(wrk, vec, N);
+        break; }
+      AT::copy(wrk, vec, N);
+      numIts++; }}
+  return numIts;
+}
+// -maybe get rid of the function that that computes only the largest - give this function another
+//  parameter that determines, how many eigenvalues should be computed, and if it's 1, it just 
+//  reduces to the function that computes the largest.
+// -maybe have a boolean parameter to switch between finding eigenspace of A or A^-1 - in the 2nd
+//  case, we may have to use solve(A, vec, wrk) or solve(A, wrk, vec) instead of 
+//  product(A, vec, wrk) ...maybe we could also finde eigenvalues of A^T, A^-T
+// -maybe try to improve convergence by using a matrix with suitably shifted eigenvalues, the 
+//  shift should be such as to maximize the ratio between the largest and second-to-largest 
+//  (remaining, absolute) eigenvalue. maybe the trace could help: it's the sum of all eigenvalues,
+//  divide by N to get the average and subtract that average to center the eigenvalues around zero.
+//  ...but for the 2nd eigenpair, we want to center the *remaining* eigenvalues around zero - maybe 
+//  subtract all the already found eigenvalues from the trace before dividing by N -> experiments
+//  needed. ..the determinant is the product of all eigenvalues btw - but i don't think that's 
+//  helpful here (it's hard to compute anyway)
+
+//=================================================================================================
+
+
+template<class T> 
+bool isHarmonic2(const rsBivariatePolynomial<T>& u, T tol = T(0))
+{
+  for(int m = 2; m <= u.getDegreeX(); m++) {
+    for(int n = 2; n <= u.getDegreeY(); n++) {
+      T c_xx = m * (m-1) * u.coeff(m  , n-2);   // coeff for x^(m-2) * y^(n-2) in u_xx
+      T c_yy = n * (n-1) * u.coeff(m-2, n  );   // coeff for x^(m-2) * y^(n-2) in u_yy
+      if(rsAbs(c_xx + c_yy) > tol)
+        return false;   }}
+  return true;
+}
+// -needs more tests
+// -if it works, maybe replace the old implementation in rsBivariatePolynomial - this here is more
+//  efficient
+// -make a function makeHarmonicY that assigns:
+//    u.coeff(m-2, n) = -m * (m-1) * u.coeff(m, n-2) / (n * (n-1))
+//  and a makeHarmonicX that assigns:
+//    u.coeff(m, n-2) = -n * (n-1) * u.coeff(m-2, n) / (m * (m-1))
+//  and maybe some sort of symmetric version that assigns both - the goal is always that 
+//  c_xx + c_yy = 0  ->  m * (m-1) * u[m, n-2] + n * (n-1) * u[m-2, n] = 0
+//  m * (m-1) * u[m, n-2] = -n * (n-1) * u[m-2, n]
+//  so:
+//    u[m, n-2] / u[m-2, n] = -(n*(n-1)) / (m*(m-1))
+//  i think, this is the general symmetry condition that the matrix for a harmonic polynomial must
+//  satisfy
+
+template<class T> 
+rsPolynomial<std::complex<T>> getComplexFromHarmonicUV(
+  const rsBivariatePolynomial<T>& u, const rsBivariatePolynomial<T>& v)
+{
+  rsAssert(rsBivariatePolynomial<T>::areHarmonicConjugates(u, v));
+  // fails: seems like ux == -vy where we should have ux == vy - there's some sign confusion: i 
+  // think P_y is not the harmonic conjugate of of P_x, -P_y is
+
+  /*
+  int M = rsMax(u.getDegreeX(), v.getDegreeX());
+  rsPolynomial<std::complex<T>> p(M);
+  for(int i = 0; i <= M; i++)
+  p[i] = std::complex<T>(u.getCoeffPadded(i, 0), v.getCoeffPadded(i, 0));
+  return p;
+  // seems like if v.degX > u.degX, the last coeff is zero anyway - more tests needed
+  */
+
+  int M = rsMin(u.getDegreeX(), v.getDegreeX());
+  rsPolynomial<std::complex<T>> p(M);
+  for(int i = 0; i <= M; i++)
+    p[i] = std::complex<T>(u.coeff(i, 0), v.coeff(i, 0));
+  return p;
+}
+// needs more tests - especially: why should the loop go only up to M and not max(M,N), where 
+// N = v.getDegreeX(), using a zero-padded accessor like getCoeffPadded(i, 0) for safe 
+// out-of-range access returning 0? ...or maybe the loop should go only up to min(M,N)
+
+
+template<class T> 
+void firstFundamentalForm(const rsBivariatePolynomial<T>& x, const rsBivariatePolynomial<T>& y,
+  const rsBivariatePolynomial<T>& z, rsBivariatePolynomial<T>& E, rsBivariatePolynomial<T>& F,
+  rsBivariatePolynomial<T>& G)
+{
+  using BiPoly = rsBivariatePolynomial<T>;
+  BiPoly x_u = x.derivativeX();     // dx/du
+  BiPoly x_v = x.derivativeY();     // dx/dv
+  BiPoly y_u = y.derivativeX();     // dy/du
+  BiPoly y_v = y.derivativeY();     // dy/dv
+  BiPoly z_u = z.derivativeX();     // dz/du
+  BiPoly z_v = z.derivativeY();     // dz/dv
+  E = x_u*x_u + y_u*y_u + z_u*z_u;
+  F = x_u*x_v + y_u*y_v + z_u*z_v;
+  G = x_v*x_v + y_v*y_v + z_v*z_v;
+}
+// see Weitz - Differentialgeometrie, p.154
+// -maybe make a function that takes as input an rsVector3D of rsBivariatePolynomial instead of 
+//  x,y,z separately
+// -are E,F,G the entries of J^T * J where J is the Jacobian and E*G - 2*F is its determinant?
+
+// todo: 
+// -consider parametric surfaces given by a triple of bivariate polynomials:
+//  x(u,v), y(u,v), z(u,v) (note that u,v are here the independent variables, i.e. the inputs to
+//  the 3 component polynomials, in the context of complex analysis, they were used for the real 
+//  and imaginary part of the function - don't get confused by this!)
+// -write a function to compute the first fundamental form coeffs E,F,G of the surface
+// -functions for principal curvatures, mean curvature and Gaussian curvature - these should
+//  all be bivariate polynomials again (if i'm not mistaken)
+// -circulation ond flux through a curve (path integrals over curl and divergence)
+// -maybe integral functions that take univariate polynomials for the integration limits
+
+
+// experimental - doesn't seem to work:
+template<class T> 
+void vectorPotential2(const rsTrivariatePolynomial<T>& f, const rsTrivariatePolynomial<T>& g,
+  const rsTrivariatePolynomial<T>& h, const rsTrivariatePolynomial<T>& d, 
+  rsTrivariatePolynomial<T>& F, rsTrivariatePolynomial<T>& G, rsTrivariatePolynomial<T>& H)
+{
+  using TP = rsTrivariatePolynomial<T>;
+  TP fz   = f.integralZ();
+  TP gz   = g.integralZ();
+  TP fz_x = fz.derivativeX();
+  TP gz_y = gz.derivativeY();
+  TP a_x  = h + fz_x + gz_y;
+  TP a    = a_x.integralX();
+
+  TP fz_y = fz.derivativeY();
+  TP gz_x = gz.derivativeX();
+  TP a_y  = a.derivativeY();
+  TP D    = d + fz_y - gz_x;
+  TP b_x  = D - a_y;
+  TP b    = b_x.integralX();
+
+  F = b + gz;       // F(x,y,z) =  gz + b(x,y)
+  G = a - fz;       // G(x,y,z) = -fz + a(x,y)
+  H = TP(0,0,0);    // H(x,y,z) =  0
+}
+
+
+template<class T>
+void potentialToDivergence(const rsBivariatePolynomial<T>& P, rsBivariatePolynomial<T>& D)
+{
+  int M = P.getDegreeX(); 
+  int N = P.getDegreeY();
+  D.initialize(M, N);
+  for(int m = 0; m <= M; m++) {
+    for(int n = 0; n <= N; n++) {
+      if(m <= M-2 && n <= N-2)
+        D.coeff(m, n) = (m+1)*(m+2)*P.coeff(m+2, n) + (n+1)*(n+2)*P.coeff(m, n+2);
+      else if(m <= M-2 && n > N-2)
+        D.coeff(m, n) = (m+1)*(m+2)*P.coeff(m+2, n);
+      else if(m > M-2 && n <= N-2)
+        D.coeff(m, n) = (n+1)*(n+2)*P.coeff(m, n+2);
+      else
+        D.coeff(m, n) = T(0); }}
+}
+
+template<class T>
+void divergenceToPotential1(const rsBivariatePolynomial<T>& D, rsBivariatePolynomial<T>& P)
+{
+  int M = D.getDegreeX();
+  int N = D.getDegreeY();
+  P.initialize(M+2, N+2);
+  for(int m = 0; m <= M; m++) 
+    for(int n = 0; n <= N; n++) 
+      P.coeff(m+2, n) = (D.coeff(m, n) - (n+1)*(n+2)*P.coeff(m, n+2)) / ((m+1)*(m+2));
+}
+// something is still wrong - now it produces too many nonzero entries - i think, it works only 
+// when the bottom-right 2x2 section of the divergence is zero?
+// seems like we could fix it by zeroing the last two rows ..or well - we need to do something
+// that creates zeros in the last two rows in the computed divergence
+
+template<class T>
+void divergenceToPotential4(const rsBivariatePolynomial<T>& D, rsBivariatePolynomial<T>& P)
+{
+  int M = D.getDegreeX();
+  int N = D.getDegreeY();
+  P.initialize(M+2, N+2);
+  for(int m = 0; m <= M; m++) 
+    for(int n = 0; n <= N; n++) 
+      P.coeff(m+2, n) = (D.coeff(m, n) - (n+1)*(n+2)*P.coeff(m, n+2)) / ((m+1)*(m+2));
+
+  //for(int m = M; m <= M+2; m++) 
+  //  for(int n = 0; n <= N+2; n++)
+  //    P.coeff(m, n) = T(0);
+}
+
+
+template<class T>
+void divergenceToPotential2(const rsBivariatePolynomial<T>& D, rsBivariatePolynomial<T>& P)
+{
+  int M = D.getDegreeX();
+  int N = D.getDegreeY();
+  P.initialize(M+2, N+2);
+  for(int n = 0; n <= N; n++)
+    for(int m = 0; m <= M; m++)
+      P.coeff(m, n+2) = (D.coeff(m, n) - (m+1)*(m+2)*P.coeff(m+2, n)) / ((n+1)*(n+2));
+}
+// note that we had to exchange the loops compared to divergenceToPotential1 
+
+// experimental:
+template<class T>
+void divergenceToPotential3(const rsBivariatePolynomial<T>& D, rsBivariatePolynomial<T>& P)
+{
+  int M = D.getDegreeX();
+  int N = D.getDegreeY();
+  P.initialize(M+2, N+2);
+  for(int n = 0; n <= N; n++)
+    for(int m = 0; m <= M; m++)
+      if(m <= M-2 /* || n <= N-2*/)
+        P.coeff(m, n+2) = (D.coeff(m, n) - (m+1)*(m+2)*P.coeff(m+2, n)) / ((n+1)*(n+2));
+}
 
 //=================================================================================================
 // the stuff below is just for playing around - maybe move code elsewhere, like the research-repo:

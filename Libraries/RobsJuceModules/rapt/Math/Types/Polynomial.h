@@ -7,7 +7,7 @@ have to create an instance of class rsPolynomial to use its functionality. Howev
 convenience, you may also instantiate polynomial objects and then you can do arithemetic operations
 with these objects directly, for example writing code like:
 
-  rsPolynomial<float> r = p*q;
+  rsPolynomial<double> r = p*q;
 
 where p and q are both polynomials and so is r - and the * operator implements polynomial 
 multiplication. But doing it this way is recommended mostly for prototyping only because creating
@@ -20,10 +20,15 @@ There are some static functions that use their own template parameter types inde
 real inputs and produce complex outputs (like root-finders) which then use "R" for the real type
 and std::complex<R> for the complex type. This is done because this class template should be able
 to be instantiated for real and complex types "T", so using the same template parameter could lead
-to confusion like the compiler using a nested complex type which makes no sense
+to confusion like the compiler using a nested complex type which makes no sense.
 ....under construction....tbc...  */
 
 // todo: 
+// -in the low-level function interfaces, use consistently "degree" or "aDeg", "bDeg" etc. 
+//  instead of the generic N, aN, bN etc. to make it clear to the caller that the degree must be 
+//  passed and *NOT* the length of the coefficient array (which is one more than the degree). 
+//  Conflating the two is a constant source of confusion and off-by-one bugs and even heap 
+//  corruptions.
 // -use consistently input arrays as first and output arrays as last parameters for example in
 //  interpolant, fitQuadraticDirect -> this will silenty break client code, so be extra careful to
 //  adapt the code at *every* call site - it should be a consistent pattern through the library:
@@ -56,18 +61,20 @@ public:
   rsPolynomial(int degree = 0, bool initWithZeros = true);
 
   /** Creates a polynomial from a std::vector of coefficients. */
-  //rsPolynomial(const std::vector<T>& coefficients) : coeffs(coefficients) {}
-  rsPolynomial(const std::vector<T>& coefficients) 
-  {
-    setCoeffs(coefficients);
-  }
+  //rsPolynomial(const std::vector<T>& coefficients) : coeffs(coefficients) {}  // why not?
+  rsPolynomial(const std::vector<T>& coefficients) { setCoeffs(coefficients); }
+
+  /** Creates a polynomial from an initializer list for the coefficients. */
+  rsPolynomial(std::initializer_list<T> l) : coeffs(l) {}
+  //  needs tests
+  // maybe take a reference? hmm...no, the examples here also use a value:
+  // https://en.cppreference.com/w/cpp/utility/initializer_list
+  // https://www.learncpp.com/cpp-tutorial/10-7-stdinitializer_list/
 
   /** Promotes a number to a 0th degree polynomial. */
-  rsPolynomial(const T& number)
-  { coeffs.resize(1); coeffs[0] = number; }
+  rsPolynomial(const T& number) { coeffs.resize(1); coeffs[0] = number; }
 
-  // todo: make a constructor that accepts an initializer list ...or can the one taking the vector
-  // be used, i.e. will an initializer list be implicitly converted toa std::vector?
+  // make a constructor that initializes from a raw array
 
 
   //-----------------------------------------------------------------------------------------------
@@ -87,8 +94,52 @@ public:
 
   void negate()
   { rsArrayTools::negate(&coeffs[0], &coeffs[0], (int) coeffs.size()); }
-  // the conversion to int may be avoided
 
+  /** Stretches (or compresses) the polynomial along the x axis. */
+  void stretch(T factor)
+  { scaleArgument(&coeffs[0], &coeffs[0], getDegree(), T(1)/factor); }
+
+  /** Scales the output of the whole polynomial by the given factor. */
+  void scale(T factor)
+  { rsArrayTools::scale(&coeffs[0], (int) coeffs.size(), factor); }
+
+
+  void shiftX(T dx) 
+  {
+    std::vector<T> tmp = coeffs;
+    shiftArgument(&tmp[0], &coeffs[0], getDegree(), dx);
+  }
+  // needs tests
+
+  /** Shifts the polynomial up and down in the y direction by the given dy. */
+  void shiftY(T dy) { coeffs[0] += dy; }
+
+  /** Turns this polynomial into the indefinite integral of itself with integration constant c 
+  (this c becomes the coeff fo x^0 = 1). */
+  void integrate(T c = T(0))
+  { 
+    coeffs.resize(coeffs.size()+1);
+    integral(&coeffs[0], &coeffs[0], getDegree()-1, c); // -1 bcs resize has increased degree
+  }
+
+  /** Sets the allcoated degree of this polynomial. The "allocated" qualifier means, that we are 
+  talking about the length of the coeff array (minus 1) regardless whether the highest coeff in 
+  this array is zero or not. If the new degree is less than the old one, we'll just cut off the 
+  coefficient array at the given new endpoint. If the new degree is greater than the old one, we
+  take over the lower coefficients and fill higher coefficients with zero. */
+  void setAllocatedDegree(int newDegree) { coeffs.resize(newDegree+1); }
+
+  /** Adds the givne polynomial q multiplied by a scalar weight into this one. If q has higher 
+  degree thatn this one, the degree of this will be increased to accomodate for the higher 
+  coefficients in q - so the function may reallocate memory. */
+  void addWithWeight(const rsPolynomial<T>& q, T w)
+  {
+    int qDeg = q.getDegree();
+    if(qDeg > getDegree())
+      setAllocatedDegree(qDeg);
+    for(int i = 0; i <= qDeg; i++)
+      coeffs[i] += w * q.coeffs[i];
+  }
 
 
   //-----------------------------------------------------------------------------------------------
@@ -100,18 +151,42 @@ public:
   //int getMaxOrder() const { return (int)coeffs.size()-1; }
   // deprecate this 
 
-  /** Returns the degree of the polynomial, defined as... */
+  /** Returns the degree of the polynomial. Mathematically, this is defined as the exponent of the 
+  highest power of x which has a nonzero coefficient....but the function currently just returns the 
+  degree as it is determined by the length of the coefficient array, not checking if that last 
+  value is zero because doing so would need some tolerance when using floating point numbers and 
+  i'm not yet sure, how to best handle that...typically, client code wants to know, how long the
+  coefficient array is anyway....tbc... */
   int getDegree() const { return (int)coeffs.size()-1; }
   // should take into account trailing zeros ..or maybe have a boolean flag
   // "takeZeroCoeffsIntoAccount" which defaults to false...or maybe it shouldn't have any default
   // value - client code must be explicit...or maybe have functions getAllocatedDegree, 
   // getActualDegree(tolerance)...or getDegree has an optional parameter for the tolerance 
-  // defaulting to 0
+  // defaulting to 0...but no - the calls may still be ambiguous from client code, when nothing is 
+  // passed...it's also confusing to pass a number into such a getter
+
+  /** Returns the number of coefficients in this polynomial. */
+  int getNumCoeffs() const { return (int)coeffs.size(); }
+  // maybe client code should preferably use this, when it wants to know the length of the coeff 
+  // array and not getDegree because of the ambiguity
 
   /** Returns the leading coefficient, i.e. the coefficient that multiplies the highest power of 
   x. */
   T getLeadingCoeff() const { return rsLast(coeffs); }
   // what if we have trailing zeros in the coeff array?
+
+  /** Returns the i-th coefficient, i.e. the coefficient for x^i. */
+  T getCoeff(int i) const { rsAssert(i >= 0 && i <= getDegree()); return coeffs[i]; }
+
+  /** Returns the i-th coefficient, i.e. the coefficient for x^i or zero if i is greater than the 
+  degree of this polynomial. */
+  T getCoeffPadded(int i) const 
+  { 
+    rsAssert(i >= 0); 
+    if(i > getDegree())
+      return T(0);
+    return coeffs[i]; 
+  }
 
   /** Returns a pointer to our coefficient array - breaks encapsulation - use with care! */
   T* getCoeffPointer() { return &coeffs[0]; }
@@ -126,19 +201,8 @@ public:
   bool isMonic() const { return getLeadingCoeff() == T(1); }
   // what if we have trailing zeros in the coeff array? should we have a tolerance?
 
-  /** Evaluates the first derivative of this polynomial at the given x. */
-  T derivativeAt(const T& x) 
-  { return evaluateDerivative(x, &coeffs[0], getDegree()); }
-
-  /** Evaluates the order-th derivative of this polynomial at the given x. Works also for the 0th 
-  derivative, which is the function value itself. ...but the order must be non-negative. */
-  T derivativeAt(const T& x, int order) 
-  { return evaluateDerivative(x, &coeffs[0], getDegree(), order); }
-  // todo: maybe make it also work for negative orders (in which case the antiderivative of 
-  // given order will be evaluated (setting integration constants to zero))
 
 
-  //T definiteIntegral(const T& lowerLimit, const T& upperLimit);
 
 
 
@@ -153,6 +217,15 @@ public:
       r.coeffs.data());
     return r;
   }
+
+  /** Adds the polynomial b to "this" polynomial. */
+  rsPolynomial<T>& operator+=(const rsPolynomial<T>& b) 
+  { 
+    return *this = (*this) + b;
+    // this implementation is preliminary - todo: optimize: if deg(b) > deg(this) -> resize, then
+    // loop through the coeffs up to min(deg(b), deg(this)) using +=
+  }
+
 
   /** Subtracts two polynomials. */
   rsPolynomial<T> operator-(const rsPolynomial<T>& q) const {
@@ -238,18 +311,68 @@ public:
 
 
   /** Evaluates the polynomial at the given input x. */
-  T operator()(T x) const { return evaluate(x, &coeffs[0], getDegree()); }
-  // todo: have an overloaded operator() that takes a polynomial as input and returns another 
-  // polynomial -> implement nesting/composition
+  //T operator()(T x) const { return evaluate(x, &coeffs[0], getDegree()); }
+  T operator()(T x) const { return evaluate(x); }
+
+  /** Overloaded evaluation operator () that takes a polynomial as input and returns another 
+  polynomial. This implements nesting/composition. The given x is the inner polynomial and "this" 
+  is the outer polynomial */
+  rsPolynomial<T> operator()(const rsPolynomial<T>& p) const
+  {
+    rsPolynomial<T> r(getDegree() * p.getDegree());
+    compose(&p.coeffs[0], p.getDegree(), &coeffs[0], getDegree(), &r.coeffs[0]);
+    return r;
+  }
 
   /** Read and write access to i-th coefficient (breaks encapsulation - use with care). */
   T& operator[](int i) { return coeffs[i]; }
 
-  //===============================================================================================
-  /** \name Computations on raw coefficient arrays */
+
+
+
 
   //-----------------------------------------------------------------------------------------------
-  /** \name Evaluation */
+  /** \name Evaluation (High Level) */
+
+  /** Evaluates the polynomial at the given input x. */
+  T evaluate(T x) const { return evaluate(x, &coeffs[0], getDegree()); }
+
+  /** Evaluates the first derivative of this polynomial at the given x. */
+  T derivativeAt(const T& x) 
+  { return evaluateDerivative(x, &coeffs[0], getDegree()); }
+
+  /** Evaluates the order-th derivative of this polynomial at the given x. Works also for the 0th 
+  derivative, which is the function value itself. ...but the order must be non-negative. */
+  T derivativeAt(const T& x, int order) 
+  { return evaluateDerivative(x, &coeffs[0], getDegree(), order); }
+  // todo: maybe make it also work for negative orders (in which case the antiderivative of 
+  // given order will be evaluated (setting integration constants to zero))
+
+  T integralAt(const T& x, const T c = T(0))
+  { return evaluateIntegral(x, &coeffs[0], getDegree(), c); }
+
+  T definiteIntegral(const T& lowerLimit, const T& upperLimit)
+  { return integralAt(upperLimit) - integralAt(lowerLimit); }
+
+
+
+  //-----------------------------------------------------------------------------------------------
+  /** \name Calculus (High Level) */
+
+  rsPolynomial<T> derivative() const
+  { 
+    if(getDegree() == 0) return rsPolynomial<T>(); // a constant polynomial has zero derivative
+    rsPolynomial<T> d(getDegree()-1); derivative(&coeffs[0], &d.coeffs[0], getDegree()); 
+    return d;
+  }
+
+
+
+  //===============================================================================================
+  /** \name Computations on raw coefficient arrays (low level functions) */
+
+  //-----------------------------------------------------------------------------------------------
+  /** \name Evaluation (Low Level) */
 
   /** Evaluates the polynomial defined by the array of coefficients "a" at argument "x".  The array
   of coefficients must be of length degree+1 and is interpreted as follows: a[0] is taken to be the
@@ -303,6 +426,11 @@ public:
     std::complex<R> z, std::complex<R>* P);
   // rename "P" to "y" ...or "w2 as is common in complex functions
 
+  /** Evaluates the indefinite integral of the polynomial at given x with given integration 
+  constant c. */
+  static T evaluateIntegral(const T& x, const T *a, int degree, T c = T(0));
+
+
   /** Evaluates the cubic polynomial a[0] + a[1]*x + a[2]*x^2 + a[3]*x^3 at the given x. */
   static inline T evaluateCubic(const T& x, const T* a)
   {
@@ -344,7 +472,7 @@ public:
   // polynomials (they are additionally parametrized by a set of roots)
 
   //-----------------------------------------------------------------------------------------------
-  /** \name Arithmetic */
+  /** \name Arithmetic (Low Level) */
 
   /** Forms a weighted sum of two polynomials p(x) and q(x) with weights wp and wq respectively and
   stores the coeffficients of the resulting polynomial r(x) in the r-array. The polynomials p(x)
@@ -420,6 +548,10 @@ public:
   convenience or whatever), make sure to initialize the sub-arrays with zeros. */
   static void powers(const T* a, int N, T** aPowers, int highestPower);
 
+  /** Like powers(const T* a, int N, T** aPowers, int highestPower) but using a flat array for the
+  output ...tbc... */
+  static void powers(const T* a, int N, T* aPowers, int highestPower, int stride);
+
   /** Let A(x) and B(x) be polynomials represented by their coefficient arrays a[] and b[]
   respectively. This function creates the coefficients of a polynomial C(x), represented by the
   coefficient array c[], that results from composing the polynomials A(x) and B(x), that is: first
@@ -428,27 +560,44 @@ public:
   polynomials can itself be seen as a polynomial in its own right. This resulting polynomial has
   a degree of cN = aN*bN, where aN and bN are the degrees of the a[] and b[] polynomials,
   respectively, so the caller has to make sure that the c[] array has at least a length of
-  aN*bN+1. */
+  aN*bN+1. The workspace must also be of length aN*bN+1. */
+  static void compose(const T* a, int aN, const T* b, int bN, T* c, T* workspace);
+  // i think, the complexity is O(aN^2 * bN)...verify!
+
+  /** Convenience function that allocates a workspace internally. */
   static void compose(const T* a, int aN, const T* b, int bN, T* c);
-  // allocates heap memory
+
+  /** Composes (nests) the outer polynomial a(x) = a0 + a1*x + a2*x^2 + a3*x^3 with the inner
+  polynomial b(x) = b0 + b1*x and writes the resulting cofficients into c (which may point to the
+  same array as a for in-place use). */
+  static void composeLinearWithCubic(T* a, T* c, T b0, T b1);
 
   /** Given an array of polynomial coefficients "a" such that
   p(x) = a[0]*x^0 + a[1]*x^1 + ... + a[N]*x^N, this function returns (in "am") the coefficients for
   a polynomial q(x) such that q(x) = p(-x). This amounts to sign-inverting all coefficients which
   multiply odd powers of x. */
-  static void coeffsForNegativeArgument(const T *a, T *am, int N);
-  // rename to negateArgument
+  static void negateArgument(const T *a, T *am, int N);
+
+  /** Given an array of polynomial coefficients "a" such that
+  p(x) = a[0]*x^0 + a[1]*x^1 + ... + a[N]*x^N, this function returns (in "as") the coefficients for
+  a polynomial q(x) such that q(x) = p(scaler*x). This amounts to scaling all coefficients with the
+  scaler raised to the same power as the respective x. */
+  static void scaleArgument(const T *a, T *as, int N, T scaler);
+  // maybe rename to stretch or scaleX
 
   /** Given an array of polynomial coefficients "a" such that
   p(x) = a[0]*x^0 + a[1]*x^1 + ... + a[N]*x^N, this function returns (in "aShifted") the coefficients
   for a polynomial q(x) such that q(x) = p(x-x0). */
-  static void coeffsForShiftedArgument(const T *a, T *aShifted, int N, T x0);
-  // allocates heap memory
-  // rename to shiftArgument, maybe move into "Conversions" section
+  static void shiftArgument(const T *a, T *aShifted, int N, T x0);
+  // allocates heap memory and algo is O(N^2) - can this be done better? ..i think so ...yes - we 
+  // should use compose and a workspace of length N (or N+1) should suffice, see comments in
+  // shiftPolynomial in MathExperiments.cpp
+  // maybe move into "Conversions" section
+  // maybe rename to shiftX
 
 
   //-----------------------------------------------------------------------------------------------
-  /** \name Calculus */
+  /** \name Calculus (Low Level) */
 
   /** Finds the coefficients of the derivative of the N-th degree polynomial with coeffs in "a" and
   stores them in "ad". The degree of the polynomial represented by the coeffs in "ad" will be
@@ -484,7 +633,7 @@ public:
 
 
   //-----------------------------------------------------------------------------------------------
-  /** \name Roots */
+  /** \name Roots (Low Level) */
 
   /** Finds all complex roots of a polynomial by Laguerre's method and returns them in "roots". */
   template<class R>
@@ -594,7 +743,7 @@ public:
 
 
   //-----------------------------------------------------------------------------------------------
-  /** \name Conversions */
+  /** \name Conversions (Low Level) */
   // changes for the representation of the polynomial
 
   /** Given expansion coefficients a[k] of an arbitrary polynomial P(x) with given degree in terms
@@ -647,7 +796,7 @@ public:
   // drag the ..shiftArgument function in this group
 
   //-----------------------------------------------------------------------------------------------
-  /** \name Fitting/Interpolation */
+  /** \name Fitting/Interpolation (Low Level) */
 
   /** Computes coefficients a[0], a[1], a[2], a[3] for the cubic polynomial that goes through the
   points (x[0], y[0]) and (x[1], y[1]) and has first derivatives of dy[0] and dy[1] at these points
@@ -791,7 +940,7 @@ public:
 
 
   //-----------------------------------------------------------------------------------------------
-  /** \name Coefficient generation */
+  /** \name Coefficient generation (Low Level) */
   // functions to generate coefficient arrays for certain special polynomials
 
   /** Computes polynomial coefficients of a polynomial that is defined recursively by
@@ -866,7 +1015,7 @@ public:
   // maybe rename to coeffsNewtonInPlace
 
   //-----------------------------------------------------------------------------------------------
-  // Evaluation of special polynomials
+  // Evaluation of special polynomials (Low Level)
   // maybe move into the Evaluation section
 
   // move the evaluateHermite function here - use consistent naming - either they should all start
@@ -903,6 +1052,14 @@ public:
   // integers), which is expected because it just does basic arithmetic - as long as every 
   // intermediate result is exactly representable, the recursion will give exact results
 
+  // We have: cos(n*a) = T_n(cos(a)), see: https://www.youtube.com/watch?v=VOM3giwqMJw&t=14m5s
+  // ...how about sin(n*a) = S_n(sin(a)) for some other sort of polynomial? is this possible?
+  // maybe S_n(x) = sin(n*asin(x)) in analogy with the code above (for -1 <= x <= +1)?
+  // see https://en.wikipedia.org/wiki/Chebyshev_polynomials#Trigonometric_definition
+  // ...so the U_n polynomials do not work that way (but similar, so maybe also useful)
+  // https://mathworld.wolfram.com/ChebyshevPolynomialoftheFirstKind.html
+  // https://mathworld.wolfram.com/ChebyshevPolynomialoftheSecondKind.html
+
 
 
 protected:
@@ -918,6 +1075,16 @@ protected:
   //template<class U> friend rsPolynomial<U> ::fitPolynomial(int numDataPoints, U* x, U* y, int degree);
 
 };
+
+/** Multiplies a number and a polynomial. */
+template<class T>
+inline rsPolynomial<T> operator*(const T& s, const rsPolynomial<T>& p)
+{
+  rsPolynomial<T> q = p;
+  q.scale(s);
+  return q;
+}
+
 
 // todo: implement a function that determines the number of real roots of a polynomial in an
 // interval by means of Sturmian sequences (see Einführung in die computerorientierte Mathematik

@@ -132,7 +132,7 @@ maintaining the heap-property. To understand what that property means, we must f
 flat array A as a binary tree in the following way:
 
   left(i)   = 2*i + 1          left child index of index i
-  reight(i) = 2*i + 2          right child index of index i
+  right(i)  = 2*i + 2          right child index of index i
   parent(i) = (i-1) / 2        parent index of index i
 
 Given that, the heap property says that for every node with index i (except the root), it holds
@@ -161,6 +161,8 @@ public:
   function is meant mostly for testing and debugging purposes and is currently implemented
   recursively (i.e. inefficiently). */
   bool isHeap(int i = 0) const;
+
+
 
 
   //-----------------------------------------------------------------------------------------------
@@ -219,6 +221,9 @@ protected:
 
 
   // todo: implement functions:  T peek(int i), extractMax, increaseKey, heapMax, see (1)
+  // todo: implement int find(const T& x); ...should be possible in log(N) time complexity, or 
+  // maybe not? if both children are larger than our searched value, we would have to traverse
+  // two subtrees..but maybe at least O(log(N)) on average?
 
   template<class U> friend class rsDoubleHeap;
 

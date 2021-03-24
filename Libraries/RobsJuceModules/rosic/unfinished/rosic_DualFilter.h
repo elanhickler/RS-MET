@@ -4,7 +4,7 @@
 namespace rosic
 {
 
-class rsDualFilter
+class rsDualFilterPoly : public rsPolyModule
 {
 
 public:
@@ -19,27 +19,30 @@ public:
   };
 
 
+  //virtual rsFloat64x2 getSample(const rsFloat64x2& in, int voice)
 
-  INLINE rsFloat64x2 getSample(const rsFloat64x2& x)
+
+  rsFloat64x2 getSample(const rsFloat64x2& x, int v) override
   {
     if(delayConfig == DELAY_BOTH)
     {
       rsFloat64x2 y1Old = y1;
-      y1 = filter1->getSample(a*x + d*y2);
-      y2 = filter2->getSample(b*x + c*y1Old);
+      y1 = filter1->getSample(a*x + d*y2,    v);
+      y2 = filter2->getSample(b*x + c*y1Old, v);
     }
     else if(delayConfig == DELAY_SECOND)
     {
-      y1 = filter1->getSample(a*x + d*y2);
-      y2 = filter2->getSample(b*x + c*y1);
+      y1 = filter1->getSample(a*x + d*y2, v);
+      y2 = filter2->getSample(b*x + c*y1, v);
     }
     else  // delayConfig == DELAY_FIRST
     {
-      y2 = filter2->getSample(b*x + c*y1);
-      y1 = filter1->getSample(a*x + d*y2);
+      y2 = filter2->getSample(b*x + c*y1, v);
+      y1 = filter1->getSample(a*x + d*y2, v);
     }
     return e*y1 + f*y2;
   }
+  // needs test
 
   /*
   INLINE void getSampleFrameStereo(double* left, double* right)
@@ -53,11 +56,13 @@ public:
 protected:
 
   /** Given x and y (in the range 0..1), this function computes our a,..,f coefficients (gains for
-  the inputs, feedback and outputs. */
+  the inputs, feedback and outputs. ...or maybe the range should be -1..+1 */
   void computeCoeffs(double x, double y);
 
   int delayConfig = DELAY_BOTH;
   rsPolyModule *filter1 = nullptr, *filter2 = nullptr;
+
+  // factor out - these need to be polyphonic, too
   rsFloat64x2 y1, y2;
   double a, b, c, d, e, f;
 

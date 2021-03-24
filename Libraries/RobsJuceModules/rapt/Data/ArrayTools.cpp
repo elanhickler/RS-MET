@@ -190,6 +190,7 @@ int rsArrayTools::compare(const T *a, int na, const T *b, const int nb)
   return 0;
 }
 
+/*
 template <class T>
 bool rsArrayTools::contains(const T *buffer, const int length, const T elementToFind)
 {
@@ -201,6 +202,7 @@ bool rsArrayTools::contains(const T *buffer, const int length, const T elementTo
   return false;
   //return (rsFindFirstOccurrenceOf(buffer, length, elementToFind) != -1);
 }
+*/
 
 template <class T>
 void rsArrayTools::convolve(const T *x, const int xLength, const T *h, const int hLength, T *y)
@@ -479,6 +481,21 @@ void rsArrayTools::fillWithRandomValues(T *buffer, int length, double min, doubl
   rsRandomUniform(min, max, seed);
   for(int i = 0; i < length; i++)
     buffer[i] = (T)rsRandomUniform(min, max, -1);
+}
+
+template <class T>
+void rsArrayTools::fillWithRandomIntegers(T *buffer, int length, int min, int max, int seed)
+{
+  fillWithRandomValues(buffer, length, T(min)-T(0.5), T(max)+T(0.5), seed);
+  for(int i = 0; i < length; i++)
+  {
+    buffer[i] = rsRound(buffer[i]);
+    if(buffer[i] < T(min)) buffer[i] = T(min);
+    if(buffer[i] > T(max)) buffer[i] = T(max);
+  }
+  // The +-0.5 is for making the min/max values equally likely to the "inner" values - but then, 
+  // the rounding could produce numbers min-1, max+1 (in very unlikely edge cases, but possible 
+  // anyway), so we need to catch these.
 }
 
 template <class T>
@@ -819,6 +836,8 @@ int rsArrayTools::findPeakOrValleyLeft(const T *x, int N, int n0)
   return nL;
 }
 
+/*
+// moved to .h file
 template<class T>
 int rsArrayTools::findSplitIndex(const T* A, int N, T key)
 {
@@ -841,6 +860,7 @@ int rsArrayTools::findSplitIndex(const T* A, int N, T key)
 }
 // compare to this: https://en.wikipedia.org/wiki/Binary_search_algorithm
 // what about RSLib? look, if we have something like hat there already
+*/
 
 template<class T>
 int rsArrayTools::findSplitIndexClosest(const T* a, const int N, const T val)
@@ -855,7 +875,7 @@ int rsArrayTools::findSplitIndexClosest(const T* a, const int N, const T val)
   return i;
 }
 
-
+/* moved to .h
 template <class T>
 bool rsArrayTools::isSortedAscending(const T *buffer, int length)
 {
@@ -864,6 +884,7 @@ bool rsArrayTools::isSortedAscending(const T *buffer, int length)
       return false; }
   return true;
 }
+*/
 
 template <class T>
 bool rsArrayTools::isSortedStrictlyAscending(const T *buffer, int length)
@@ -1026,6 +1047,16 @@ T rsArrayTools::meanDifference(const T *x, int N)
 }
 
 template<class T>
+int rsArrayTools::numNonZeros(const T* x, int N)
+{
+  int n = 0;
+  for(int i = 0; i < N; i++)
+    if(x[i] != T(0))
+      n++;
+  return n;
+}
+
+template<class T>
 T rsArrayTools::meanSquare(const T *x, int N)
 {
   return sumOfSquares(x, N) / T(N);
@@ -1101,14 +1132,38 @@ template <class T1, class T2, class TR>
 void rsArrayTools::multiply(const T1 *buffer1, const T2 *buffer2, TR *result, int length)
 {
   for(int i = 0; i < length; i++)
+  {
     result[i] = TR(buffer1[i] * buffer2[i]);
+    // does not compile when T1 == std::complex<float> and T2 == double. This occurs in
+    // rsPolynomial<T>::evaluateWithDerivatives when we call 
+    // rsArrayTools::multiply(&results[2], &rsFactorials[2], &results[2], numDerivatives-1);
+    // becasue the rsFactorials array is an array of doubles...
+
+    //result[i] = TR(buffer1[i]) * TR(buffer2[i]);
+    // ...so we need to do the conversion to the result type for both operands separately, not just
+    // for the result itself
+  }
 }
 
 template<class T>
-void rsArrayTools::negate(const T *source, T *destination, int length)
+void rsArrayTools::negate(const T *x, T *y, int N)
 {
-  for(int i = 0; i < length; i++)
-    destination[i] = -source[i];
+  for(int i = 0; i < N; i++)
+    y[i] = -x[i];
+}
+
+template<class T>
+void rsArrayTools::negateEven(const T *x, T *y, int N)
+{
+  for(int i = 0; i < N; i += 2) y[i] = -x[i];
+  for(int i = 1; i < N; i += 2) y[i] =  x[i];
+}
+
+template<class T>
+void rsArrayTools::negateOdd(const T *x, T *y, int N)
+{
+  for(int i = 0; i < N; i += 2) y[i] =  x[i];
+  for(int i = 1; i < N; i += 2) y[i] = -x[i];
 }
 
 template <class T>
@@ -1294,8 +1349,8 @@ inline void rsArrayTools::swapDataBuffers(void *buffer1, void *buffer2, void *bu
 template<class T>
 void rsArrayTools::transformRange(const T* x, T* y, int N, T targetMin, T targetMax)
 {
-  T currentMin = rsArrayTools::minValue(x, N);
-  T currentMax = rsArrayTools::maxValue(x, N);
+  T currentMin = minValue(x, N);
+  T currentMax = maxValue(x, N);
   T a = (targetMin - targetMax) / (currentMin - currentMax);
   T b = (currentMax*targetMin - currentMin*targetMax) / (currentMax - currentMin);
   affineTrafo(x, y, N, a, b);
@@ -1315,12 +1370,10 @@ template<class T>
 void rsArrayTools::transposeSquareArray(T **A, int N)
 {
   int k = 1;
-  for(int i = k-1; i < N-1; i++)
-  {
+  for(int i = k-1; i < N-1; i++) {
     for(int j = k; j < N; j++)
       rsSwap(A[i][j], A[j][i]);
-    k++;
-  }
+    k++; }
 }
 
 template<class T>

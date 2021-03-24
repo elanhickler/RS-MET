@@ -243,10 +243,24 @@ bool TurtleSource::isInInitialState()
   return r;
 }
 
-void TurtleSource::resetPhase()
+void TurtleSource::resetPhase(double newPhase)  
 {
-  pos = 0;
-  lineIndex = 0;
+  // rename newPhase to phaseAdvance or get rid - i wasn't there befroe and was inetroduced to 
+  // handle the andvance when receiving resets in getSample - but that doesn't seem to work well. 
+  // we may need a spearate resetPhaseWithAdvance function in the subclass
+
+  // old:
+  if(newPhase == 0.0) {
+    pos = 0;
+    lineIndex = 0; }
+  else {
+    pos = newPhase;
+    lineIndex = floorInt(getLinePosition(pos)); }
+
+  // new:
+  //pos = phaseOffset + newPhase;
+  //lineIndex = floorInt(getLinePosition(pos));
+
   if(useTable)
     updateLineBufferFromTable();
   else
@@ -511,6 +525,171 @@ void TurtleSource::updateMeanAndNormalizer()
   // maybe don't use the "mean" but the "center" defined as (min+max)/2 -> avoids computations and
   // is probably just as good (especially, when a DC blocking filter is used later anyway)
 }
+
+//=================================================================================================
+
+void TurtleSourceAntiAliased::getSampleFrameStereoAA(double* outL, double* outR)
+{
+  // some checks (optimize - have a single readyToPlay flag so we only need one check here):
+  if(numLines < 1)                return;
+  if(!tableUpToDate && useTable)  updateWaveTable();
+  if(!incUpToDate)                updateIncrement(); // must be done before goToLineSegment
+  updatePosition();
+
+  // handle periodic resetting:
+  double slopeChangeX, slopeChangeY;
+  double blepTime;
+  for(int i = 0; i < numResetters; i++)
+  {
+    bool shouldReset = resetters[i].tick();
+    if(shouldReset)
+    {
+      double newPhase = resetters[i].getPosition();
+      blepTime = newPhase / inc;
+      double stepX, stepY;
+      resetPhase(newPhase, &stepX, &stepY, &slopeChangeX, &slopeChangeY);
+      xBlep.prepareForStep(  blepTime, stepX);
+      yBlep.prepareForStep(  blepTime, stepY);
+      xBlep.prepareForCorner(blepTime, slopeChangeX); // commented for debuging the steps
+      yBlep.prepareForCorner(blepTime, slopeChangeY);
+    }
+  }
+  // this seems to work if only one resetter is active, but for more than one, maybe we need to 
+  // first compute the data for all (both) resetters, then sort them by order of occurrence and 
+  // then execute them? or will the first reset obviate all others? ...that would be convenient
+  // ...but we may still need to figure out, which one comes first
+  // ...or maybe just use a single resetter for the time being
+ 
+
+  /*
+  // handle periodic direction reversal:
+  bool shouldReverse = false;
+  for(int i = 0; i < numReversers; i++)
+    shouldReverse |= reversers[i].tick();
+  if(shouldReverse)
+    reverseDirection();
+    */
+  // reversers should be handled similarly to resetters, they should invert the slope, so a blamp
+  // should be inserted
+
+
+  // integer and fractional part of position:
+  double linePos = getLinePosition(pos); // linePos = 0...numLines
+  // maybe this should just use linePos = pos*numLines
+
+  int iPos = floorInt(linePos);          // iPos = 0...numLines...maybe subtract 1 in case == numLines?
+  double fPos = linePos - iPos;
+
+  // jump to appropriate line segment, thereby prepare bleps for the slope change:
+  if(iPos != lineIndex)
+  {
+    goToLineSegment(iPos, &slopeChangeX, &slopeChangeY);
+    blepTime = fPos / (numLines*inc);      // OPTIMIZE: precompute 1/(numLines*inc)
+    xBlep.prepareForCorner(blepTime, slopeChangeX);
+    yBlep.prepareForCorner(blepTime, slopeChangeY);
+  }
+
+  // read out buffered line segment (not yet anti-aliased):
+  double x, y;
+  interpolate(&x, &y, fPos);
+
+  // apply anti-aliasing:
+  x = xBlep.getSample(x);
+  y = yBlep.getSample(y);
+
+  // apply some final scaling and rotation:
+  double a = normalizer * amplitude;  // maybe precompute as finalAmplitude
+  *outL = a * (x - centerX);
+  *outR = a * (y - centerY);
+  rotator.apply(outL, outR);
+}
+
+void TurtleSourceAntiAliased::goToLineSegment(int targetLineIndex,
+  double* slopeChangeX, double* slopeChangeY)
+{
+  double s = inc * numLines;
+  double oldSlopeX = x[1] - x[0];
+  double oldSlopeY = y[1] - y[0];
+  Base::goToLineSegment(targetLineIndex);
+  double newSlopeX = x[1] - x[0];   // get rid
+  double newSlopeY = y[1] - y[0];   // get rid
+  *slopeChangeX = s * (newSlopeX - oldSlopeX);
+  *slopeChangeY = s * (newSlopeY - oldSlopeY);
+}
+
+void TurtleSourceAntiAliased::resetPhase(double targetPhase, double* stepX, double* stepY, 
+  double* slopeChangeX, double* slopeChangeY)
+{
+  double linePos, fPos, oldX, oldY, /*newX, newY,*/ oldSlopeX, oldSlopeY, s;
+  int iPos;
+
+  linePos = getLinePosition(pos);
+  iPos    = floorInt(linePos);
+  fPos    = linePos - iPos;
+  interpolate(&oldX, &oldY, fPos);
+  oldSlopeX = x[1] - x[0];
+  oldSlopeY = y[1] - y[0];
+
+  // oldX, oldY already contain an additional full step by a full increment! We must actually 
+  // subtract targetPhase * numLines * oldSlope as correction to set it back to a partial step:
+
+  s = -targetPhase * numLines;
+
+  //// test to fix problem when resetRatio = 0.25:
+  //double tol = 1.e-11;
+  //if(targetPhase <= tol)  s = 1;  // is this correct?
+
+  oldX += s * oldSlopeX;
+  oldY += s * oldSlopeY;
+
+  if(fPos == 0)   // edge case, occurs when linePos == floor(linePos)
+  //if(fPos <= tol || fPos >= 1-tol)   // hmmm ... doesn't seem right
+  { 
+    oldX = x[1]; 
+    oldY = y[1]; 
+  } 
+
+  Base::resetPhase(targetPhase);
+
+
+  // experimental:
+  double linePos2 = getLinePosition(pos);
+  int    iPos2    = floorInt(linePos);
+  if(iPos == iPos2)
+  {
+    *stepX = *stepY = 0; 
+    //*slopeChangeX = *slopeChangeY = 0;
+    //return;
+  }
+  else
+  {  
+    *stepX = x[0] - oldX;
+    *stepY = y[0] - oldY;
+  }
+  // this seems to fix the spurious spikes that occur when a wrap-around occurs immediately before
+  // a reset...but why is this needed? should the result of the computaions below yield zero in 
+  // this case? after all, when we are in the same segment pre and post Base::resetPhase, 
+  // x[0], x[1], y[0], y[1] should be the same before and after...but they do not seem to be
+  // ...soo - why does resetPhase change the x,y buffers in this case
+  // oh: but i think the s = -targetPhase * numLines; applies only if we really had a 
+  // reset that actually did an additional wraparound - otherwise, it makes no sense
+  // -this fix feels like a dirty workaround, but maybe it's indeed the way to go - we'll see
+  // -it seems to create dirt when the start-phase is not zero
+
+
+
+
+
+  s = inc * numLines;
+  *slopeChangeX = s * (x[1] - x[0] - oldSlopeX);
+  *slopeChangeY = s * (y[1] - y[0] - oldSlopeY);
+
+  int dummy = 0;
+}
+// -needs more verification with different resetRatios
+
+
+//=================================================================================================
 
 /*
 Features to do:

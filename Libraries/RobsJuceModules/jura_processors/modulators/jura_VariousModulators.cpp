@@ -62,7 +62,7 @@ AttackDecayEnvelopeModule::AttackDecayEnvelopeModule(CriticalSection *lockToUse,
   : AudioModuleWithMidiIn(lockToUse, metaManagerToUse, modManagerToUse)
 {
   ScopedLock scopedLock(*lock);
-  setModuleTypeName("AttackDecayEnvelope");
+  setModuleTypeName("AttackDecayEnvelope");  // maybe use EnvelopeAD or EnvelopeAD_Mono
   createParameters();
 }
 
@@ -107,34 +107,12 @@ void AttackDecayEnvelopeModule::setDecay(double newDecay)
 //=================================================================================================
 
 AttackDecayEnvelopeModulePoly::AttackDecayEnvelopeModulePoly(CriticalSection* lockToUse,
-  MetaParameterManager* metaManagerToUse, ModulationManager* modManagerToUse,
-  rsVoiceManager* voiceManagerToUse) 
-  : AudioModulePoly(lockToUse, metaManagerToUse, modManagerToUse, voiceManagerToUse) 
+  MetaParameterManager* metaManagerToUse, ModulationManager* modManagerToUse) 
+  : ModulatorModulePoly(lockToUse, metaManagerToUse, modManagerToUse) 
 {
   ScopedLock scopedLock(*lock);
-  setModuleTypeName("AttackDecayEnvelope");
-  createCores();
+  setModuleTypeName("EnvelopeAD");  //
   createParameters();
-}
-
-AttackDecayEnvelopeModulePoly::~AttackDecayEnvelopeModulePoly()
-{
-  for(size_t i = 0; i < cores.size(); i++)
-    delete cores[i];
-  // maybe make a subclass of std::vector rsOwnedPointerArray that deletes the objects when it
-  // goes out of scope ...i think, that's also what juce::OwnedArray does? ...maybe have an 
-  // intermediate clas rsPointerArray that doesn't do the deletion
-}
-
-void AttackDecayEnvelopeModulePoly::createCores()
-{
-  int numCores = 16; // todo: use maxNumVoices - inquire from voiceManager or AudioModulePoly baseclass
-
-  cores.resize(numCores);
-  for(size_t i = 0; i < cores.size(); i++)
-    cores[i] = new RAPT::rsAttackDecayEnvelope<double>;
-
-  int dummy = 0;
 }
 
 void AttackDecayEnvelopeModulePoly::createParameters()
@@ -154,14 +132,34 @@ void AttackDecayEnvelopeModulePoly::createParameters()
   p->setValueChangeCallbackPoly([this](double v, int i) { setDecay(v, i); });
 }
 
+void AttackDecayEnvelopeModulePoly::allocateVoiceModResources() 
+{
+  if(voiceManager)
+    cores.resize(voiceManager->getMaxNumVoices());
+  else
+    cores.resize(1); // monophonic in absence of a voice manager
+}
+
+void AttackDecayEnvelopeModulePoly::handleMidiMessage(MidiMessage msg)
+{
+  if(msg.isNoteOn())
+  {
+    // We have to trigger the envelope for one of the voices - but which? we need to figure out
+    // which voice was assigned to this note
+
+
+    int dummy = 0;
+  }
+}
+
 void AttackDecayEnvelopeModulePoly::setAttack(double newAttack, int voice)
 {
   jassert(voice < cores.size());
-
+  cores[voice].setAttackSamples(0.001 * newAttack * sampleRate);
 }
 
 void AttackDecayEnvelopeModulePoly::setDecay(double newDecay, int voice)
 {
   jassert(voice < cores.size());
-
+  cores[voice].setDecaySamples(0.001 * newDecay * sampleRate);
 }

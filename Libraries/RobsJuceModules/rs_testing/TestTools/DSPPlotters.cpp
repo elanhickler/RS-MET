@@ -100,9 +100,35 @@ void FilterPlotter<T>::plotMagnitude(int numFreqs, T lowFreq, T highFreq, bool l
   plot();
 }
 
+template <class T>
+void FilterPlotter<T>::plotPolesAndZeros(int plotSize)
+{
+  unsigned int j = 0;
+  for(unsigned int i = 0; i < filterSpecsZPK.size(); i++)
+  {
+    if(filterSpecsZPK[i].p.size() > 0) {
+      addDataComplex(filterSpecsZPK[i].p);
+      addGraph("i " + s(j) + " u 1:2 w points pt 2 ps 1 notitle");
+      j++;  }
+    if(filterSpecsZPK[i].z.size() > 0) {
+      addDataComplex(filterSpecsZPK[i].z);
+      addGraph("i " + s(j) + " u 1:2 w points pt 6 ps 1 notitle");
+      j++;  }
 
+    // show the multiplicities of poles and zeros:
+    T thresh = T(1.e-8);    // threshold for considering close poles/zeros as multiple root
+                            // maybe use something that depends on the epsilon of T
+    drawMultiplicities(filterSpecsZPK[i].p, thresh);
+    drawMultiplicities(filterSpecsZPK[i].z, thresh);
+  }
 
+  // todo: make the colors of the poles, zeros and multiplicities for each filter equal
 
+  setupForPoleZeroPlot(plotSize);
+  plot();
+}
+
+/*
 template <class T>
 void FilterPlotter<T>::plotPolesAndZeros(int plotSize)
 {
@@ -125,6 +151,8 @@ void FilterPlotter<T>::plotPolesAndZeros(int plotSize)
   setupForPoleZeroPlot(plotSize);
   plot();
 }
+// does not work, when there empty arrays of poles and/or zeros
+*/
 
 template <class T>
 vector<T> FilterPlotter<T>::getFrequencyAxis(int numFreqs, T lowFreq, T highFreq, bool logarithmic)
@@ -643,7 +671,89 @@ void SinusoidalModelPlotter<T>::plotAnalysisResult(
   plt.plot();
 }
 
+template class SinusoidalModelPlotter<double>;  // move elsewhere
+
+//=================================================================================================
+
+template <class T>
+void GraphPlotter<T>::plotGraph2D(rsGraph<rsVector2D<T>, T>& m, std::vector<int> highlight)
+{
+  GNUPlotter plt; // get rid - use "this"
+
+  double dotRadius = 0.005; 
 
 
+  auto isHighlighted = [&](int i)->bool 
+  { 
+    return rsContains(highlight, i); 
+  };
+  auto hasHighlightedNeighbor = [&](int i)->bool
+  {
+    int numNeighbors = m.getNumEdges(i);
+    for(int j = 0; j < numNeighbors; j++) {
+      int k = m.getEdgeTarget(i, j);
+      if(isHighlighted(k))
+        return true;  }
+    return false;
+  };
+  auto isEdgeHighlighted = [&](int i, int k)->bool 
+  {
+    return isHighlighted(i) && hasHighlightedNeighbor(k);
+  };
 
-template class SinusoidalModelPlotter<double>;
+
+  auto drawDot = [&](const std::string& attr, double x, double y, double r)
+  {
+    plt.addCommand("set object circle at " + s(x) + "," + s(y) + " size scr " + s(r) + " " + attr);
+  };
+  // with "size scr " we determine absolute size on screen, independent of range and zoom level
+  // move to GNUPlotter
+  // https://stackoverflow.com/questions/11138012/drawing-a-circle-of-radius-r-around-a-point
+
+  for(int i = 0; i < m.getNumVertices(); i++)
+  {
+    int numNeighbors = m.getNumEdges(i);
+    for(int j = 0; j < numNeighbors; j++)
+    {
+      int k = m.getEdgeTarget(i, j);
+      rsVector2D<T> vi = m.getVertexData(i);
+      rsVector2D<T> vk = m.getVertexData(k);
+      if(isEdgeHighlighted(i, k))
+        plt.drawLine("linewidth 4", vi.x, vi.y, vk.x, vk.y);
+      else
+        plt.drawLine("", vi.x, vi.y, vk.x, vk.y);
+    }
+  }
+  // maybe use the edge-weight to determine the color of the edge...but then we should use 
+  // somehow normalized weights...maybe...find the maximum weight and divide by that
+
+  T minX = 0, maxX = 0, minY = 0, maxY = 0;
+  std::string attr = "fillcolor \"black\" fillstyle solid";
+  for(int i = 0; i < m.getNumVertices(); i++)
+  {
+    rsVector2D<T> v = m.getVertexData(i);
+    if(isHighlighted(i))               drawDot(attr, v.x, v.y, 2.0*dotRadius);
+    else if(hasHighlightedNeighbor(i)) drawDot(attr, v.x, v.y, 1.5*dotRadius);
+    else                               drawDot(attr, v.x, v.y,     dotRadius);
+    minX = rsMin(minX, v.x);
+    maxX = rsMax(maxX, v.x);
+    minY = rsMin(minY, v.y);
+    maxY = rsMax(maxY, v.y);
+  }
+  // https://stackoverflow.com/questions/11138012/drawing-a-circle-of-radius-r-around-a-point
+  // # create a black circle at center (0.5, 0.5) with radius 0.5
+  // set object 1 circle front at 0.5,0.5 size 0.5 fillcolor rgb "black" lw 1
+
+  minX -= (maxX-minX) * T(0.05);
+  maxX += (maxX-minX) * T(0.05);
+  minY -= (maxY-minY) * T(0.05);
+  maxY += (maxY-minY) * T(0.05);
+  plt.setRange(minX, maxX, minY, maxY);
+  //plt.addCommand("set size square");   // correct?
+  //plt.addCommand("set size ratio 1");  // aspect ratio?
+  plt.setPixelSize(600, 600);
+  plt.plot();
+}
+
+template class GraphPlotter<float>;  // move elsewhere
+template class GraphPlotter<double>;  // move elsewhere

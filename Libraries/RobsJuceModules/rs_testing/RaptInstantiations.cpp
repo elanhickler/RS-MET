@@ -93,11 +93,16 @@ template rsUint32 rsArrayTools::maxValue(const rsUint32 *x, int length);
 
 // rsArrayTools<float>
 template void rsArrayTools::fillWithRange(float* x, int N, float min, float max, float shape);
-template void rsArrayTools::fillWithRandomValues(float* x, int N, double min, double max, int seed); // ?
+template void rsArrayTools::fillWithRandomValues(float* x, int N, double min, double max, int seed); // ?why the mix of float and double?
+template void rsArrayTools::fillWithRandomIntegers(double* x, int N, int min, int max, int seed);
 template float rsArrayTools::generalizedMean(const float *x, int length, float p);
+template float rsArrayTools::maxAbs(const float *x, int length);
 template float rsArrayTools::minValue(const float *x, int length);
 template float rsArrayTools::maxValue(const float *x, int length);
 template float rsArrayTools::maxDeviation(const float *buffer1, const float *buffer2, int length);
+//template void rsArrayTools::negate(    const float *x, float *y, int N);
+template void rsArrayTools::negateEven(const float *x, float *y, int N);
+template void rsArrayTools::negateOdd( const float *x, float *y, int N);
 template int rsArrayTools::maxDeviationIndex(const float *buffer1, const float *buffer2, int length);
 template void rsArrayTools::reverse(const float* x, float* y, int length);
 //template void rsArrayTools::reverse(float* x, int length);
@@ -127,7 +132,7 @@ template double rsArrayTools::maxDeviation(const double *buffer1, const double *
 template double rsArrayTools::minValue(const double *x, int length);
 template void rsArrayTools::movingAverage3pt(const double* x, int N, double* y, bool endsFixed);
 template void rsArrayTools::movingMedian3pt(const double* x, int N, double* y);
-template void rsArrayTools::negate(const double *source, double *destination, int length);
+template void rsArrayTools::negate(const double *x, double *y, int N);
 template void rsArrayTools::normalize(double *buffer, int length, double maximum, bool subtractMean);
 template void rsArrayTools::normalizeMean(double *x, int N, double newMean);
 template void rsArrayTools::reverse(const double* x, double* y, int length);
@@ -166,8 +171,9 @@ template void rsMatrixTools::matrixMultiplyBothTransposed(double **A, double **B
 template void rsMatrixTools::matrixInPlaceMultiply(double **A, double **B, int N, int M);
 
 
-
+//-------------------------------------------------------------------------------------------------
 // Math:
+
 //template RAPT::rsLinearAlgebra<float>; // doens't work bcs the template parameters are decalred in the member functions
 template void rsLinearAlgebra::rsSolveLinearSystem2x2(const double A[2][2], double x[2], const double y[2]);
 template void rsLinearAlgebra::rsSolveLinearSystem3x3(const double A[3][3], double x[3], const double y[3]);
@@ -193,10 +199,14 @@ template std::vector<double> rsLinearAlgebraNew::solveOld(rsMatrix<double> A, st
 
 template class RAPT::rsMatrixOld<double>;  // try to get rid
 
+
 template class RAPT::rsPolynomial<float>;
 template class RAPT::rsPolynomial<double>;
 template class RAPT::rsPolynomial<std::complex<double>>;
+//template class RAPT::rsPolynomial<std::complex<float>>;  // template doesn't compile with float
 //template  class RAPT::rsPolynomial<int>;                 // template doesn't compile with int
+// todo: instantiate rsPolynomial also for float, int and rsFraction<int>, maybe also for 
+// rsMatrix<float>, etc.
 
 template void RAPT::rsPolynomial<double>::divideByMonomialInPlace(double*, int, double, double*);
   // needs separate instantiation because function itself has a (second) template parameter
@@ -218,6 +228,8 @@ template void RAPT::rsPolynomial<float>::rootsCubicComplex(
   std::complex<float> a2, std::complex<float> a3,
   std::complex<float>* r1, std::complex<float>* r2, std::complex<float>* r3);
 
+template void RAPT::rsPolynomial<std::complex<double>>::roots(
+  const std::complex<double>* a, int degree, std::complex<double>* roots);
 
 template std::vector<std::complex<double>> RAPT::rsRationalFunction<double>::partialFractions(
   const std::vector<std::complex<double>>& numerator,
@@ -317,6 +329,12 @@ template int RAPT::rsChineseRemainderTheorem(int* remainders, int* moduli, rsUin
 //template rsUint32 RAPT::rsChineseRemainderTheorem(rsUint32* remainders, rsUint32* moduli, rsUint32 count);
 template void RAPT::rsFillPrimeTable(rsUint32 *primes, rsUint32 numPrimes, rsUint32 bufferSize);
 
+//template void RAPT::rsNextPascalTriangleLine(const double* x, double* y, int N);
+template void RAPT::rsPascalTriangleLine(double* y, int N);
+template void RAPT::rsPascalTriangleLine(float*  y, int N);
+template void RAPT::rsPascalTriangleLine(std::complex<double>* y, int N);
+
+
 template void RAPT::smbFft(float *fftBuffer, long fftFrameSize, long sign);
 template void RAPT::rsDFT(std::complex<double> *buffer, int N);
 template void RAPT::rsFFT(std::complex<double> *buffer, int N);
@@ -393,6 +411,21 @@ template void RAPT::rsNumericDifferentiator<double>::hessian(
 
 template void RAPT::rsNumericDifferentiator<double>::derivative(
   const double *x, const double *y, double *yd, int N, bool extrapolateEnds);
+
+template void RAPT::rsNumericDifferentiator<float>::gradient2D(
+  const rsGraph<rsVector2D<float>, float>& mesh, const std::vector<float>& u, 
+  std::vector<float>& u_x, std::vector<float>& u_y);
+
+template void RAPT::rsNumericDifferentiator<double>::gradient2D(
+  const rsGraph<rsVector2D<double>, double>& mesh, const std::vector<double>& u, 
+  std::vector<double>& u_x, std::vector<double>& u_y);
+
+template void RAPT::rsNumericDifferentiator<double>::laplacian2D(
+  const rsGraph<rsVector2D<double>, double>& mesh, const double* u, double* L);
+
+template void RAPT::rsNumericDifferentiator<double>::laplacian2D_2(
+  const rsGraph<rsVector2D<double>, double>& mesh, const std::vector<double>& u, 
+  std::vector<double>& L);
 
 
 template double RAPT::rsBandwidthConverter::bandedgesToCenterFrequency(double fl, double fu);
@@ -512,6 +545,8 @@ template double RAPT::rsEnvelopeMatchOffset(const double* x, int Nx, const doubl
 template std::vector<double> RAPT::rsExpDecayTail(const RAPT::rsSinusoidalPartial<double>& partial,
   int spliceIndex, double sampleRate);
 
+template std::vector<double> RAPT::rsFlattenPitch(const double *x, int N, double fs, double ft);
+
 // move to rsFilterAnalyzer:
 template double RAPT::analogBiquadMagnitudeSquaredAt(double B0, double B1, double B2, double A0,
   double A1, double A2, double w);
@@ -523,7 +558,29 @@ template void RAPT::rsBiDirectionalFilter::applyButterworthBandpassBwInHz(const 
   int N, double fc, double bw, double fs, int order, int numPasses, double gc);
 
 
-
-
 //template class RAPT::rsSinusoidalSynthesizer<double>;
 //template class RAPT::rsHarmonicAnalyzer<double>;
+
+//=================================================================================================
+// Instantiations of (prototype) classes that are not (yet) in the RAPT namespace
+
+template class rsBivariatePolynomial<double>;
+template class rsBivariatePolynomial<std::complex<double>>;
+
+// it's really annoying that we have to instantiate these member functions separately - maybe move 
+// their code to the header file - it is short anyway:
+template rsPolynomial<double> rsBivariatePolynomial<double>::integralX(
+  rsPolynomial<double> a, rsPolynomial<double> b) const;
+template rsPolynomial<double> rsBivariatePolynomial<double>::integralY(
+  rsPolynomial<double> a, rsPolynomial<double> b) const;
+template rsPolynomial<double> rsBivariatePolynomial<double>::integralY(
+  double a, rsPolynomial<double> b) const;
+template rsPolynomial<double> rsBivariatePolynomial<double>::integralY(
+  rsPolynomial<double> a, double b) const;
+template rsPolynomial<double> rsBivariatePolynomial<double>::integralX(
+  rsPolynomial<double> a, double b) const;
+template rsPolynomial<double> rsBivariatePolynomial<double>::integralX(
+  double a, rsPolynomial<double> b) const;
+
+template class rsTrivariatePolynomial<double>;
+template class rsPiecewisePolynomial<double>;

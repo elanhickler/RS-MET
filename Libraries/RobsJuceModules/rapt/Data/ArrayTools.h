@@ -29,13 +29,9 @@ todo:
  just keep using -1 and let it be converted to size_t, it will map to the maximum (that's what 
  2-complement does for unsigned integers, right?) which actually is a reasonable convention to 
  encode "not found" (although, std::find uses v.size() and not max(size_t)) - so it *may* just work 
- fine without any further ado (unit tests would be needed)
+ fine without any further ado (unit tests would be needed)  */
 
-
-
-*/
-
-class rsArrayTools  // 
+class rsArrayTools
 {
 
 public:
@@ -118,6 +114,10 @@ public:
   static void circularShiftInterpolated(T *buffer, const int length, const double numPositions);
   // // Allocates heap memory - todo: pass a workspace.
 
+  /** Clears the buffer, i.e. fills it with all zeros. */
+  template <class T>
+  static void clear(T* buffer, const int length) { fillWithZeros(buffer, length); }
+
   /** Restricts the values in the buffer to the range between min and max for types that define the
   operators '<' and '>'. */
   template <class T>
@@ -141,7 +141,7 @@ public:
   /** Searches the array for an element (via the '==' operator of type T) and returns true if the
   element was found. */
   template <class T>
-  static bool contains(const T *buffer, const int length, const T elementToFind);
+  static inline bool contains(const T *buffer, const int length, const T elementToFind);
 
   /** Convolves an array x (seen as input signal) with another array h (seen as impulse response)
   and stores the result in the array y. The type T must define the operators: *, += and a 
@@ -224,11 +224,12 @@ public:
   "destination". If "copyStart" is less than 0 and/or the desired "copyLength" is such that the end 
   of the copied section is beyond the end of the source-array, the head and tail of "destination" 
   will be filled with zeros appropriately, i.e. we assume "source" to contain zero values for 
-  indices < 0 and indices >= sourceLength. */
+  indices < 0 and indices >= sourceLength. The types of the elements of the source and destination
+  arrays can be different, in which case a type conversion will be performed. */
   template<class T1, class T2>
   static void copySection(const T1 *source, int sourceLength, T2 *destination, 
     int copyStart, int copyLength);
-  // rename to convertSection
+  // what if the destination array is too short?
 
   // old - without type conversion
   //template<class T>
@@ -293,9 +294,13 @@ public:
   template <class T1, class T2, class TR>
   static void divide(const T1 *buffer1, const T2 *buffer2, TR *result, int length);
 
-
   //template <class T>
   //static bool equals(const T *x, const T *y, int length, T tolerance);
+
+  /** Returns the Euclidean norm (i.e. the length) of the N-dimensional vector x. This is the 
+  square-root of the sum of the squares of the elements. */
+  template<class T>
+  static T euclideanNorm(const T* x, int N);
 
   /** Fills the array with values given by a function. For example, calling it like:
         fill(a, length, [](int i){ return 3*i+1; });
@@ -324,6 +329,11 @@ public:
   template <class T>
   static void fillWithRandomValues(T *buffer, int length, double min, double max, int seed);
 
+  /** Fills the buffer with random integer values between min and max. */
+  template <class T>
+  static void fillWithRandomIntegers(T *buffer, int length, int min, int max, int seed);
+
+
   /** Fills the buffer with values ranging (exponentially scaled) from min to max (both end-values
   inclusive). The logs of the values are equidistant. */
   template <class T>
@@ -349,11 +359,13 @@ public:
   /** Fills the passed array with one value at all indices. */
   template <class T>
   static void fillWithValue(T *buffer, int length, T value);
+  // rename to fill and/or make alias
 
   /** Fills the passed array with all zeros - the type must have a constructor that takes an int
   and initializes to the zero element when 0 is passed. */
   template <class T>
   static void fillWithZeros(T *buffer, int length);
+  // rename to clear and/or make alias
 
   /** Filters the signal in input buffer x and stores the result in output buffer y. The filter
   realizes the difference equation:
@@ -423,6 +435,10 @@ public:
   */
   template <class T>
   static int firstIndexWithNonZeroValue(const T *buffer, int length);
+  // todo: rename to something shorter - maybe 
+  // firstNonZeroIndex            may not be that clear
+  // indexOfFirstNonZero          seems a good compromise between length and clarity
+  // firstIndexWithNonZeroValue   for length comparison reference
 
   /** Scales and offsets the passed buffer such that the minimum value hits 'min' and the
   maximum value hits 'max'. */
@@ -471,10 +487,12 @@ public:
   template<class T>
   static T interpolateClamped(const T *buffer, int length, double position);
 
-  /** Returns true, if the passed buffer has only zero values, false otherwise. */
+  /** Returns true, iff the passed buffer has only zero values. */
   template <class T>
   static inline bool isAllZeros(const T *buffer, int length);
 
+  /** Returns true, iff the passed buffer has only values close to zero within the given 
+  tolerance. */
   template <class T>
   static inline bool isAllZeros(const T *buffer, int length, T tolerance);
 
@@ -503,7 +521,8 @@ public:
   static bool isPeakOrValley(const T *x, int n);
 
   /** Checks whether the buffer is sorted in ascending order, that is buffer[i] <= buffer[i+1] for
-  all i. */
+  all i, but it actually uses only the < operator in the implementation: it will return false, iff
+  buffer[i+1] < buffer[i] for some value of i. */
   template <class T>
   static bool isSortedAscending(const T *buffer, int length);
 
@@ -582,6 +601,10 @@ public:
   template<class T>
   static T meanSquare(const T *x, int N);
 
+  /** Returns the number of nonzero values in the vector array x. */
+  template<class T>
+  static int numNonZeros(const T *x, int N);
+
   /** Computes the mean of the absoulte values of the differences of arrays x and y */
   template<class T>
   inline static T meanOfAbsoluteDifferences(const T* x, const T* y, const int N)
@@ -620,9 +643,21 @@ public:
   template <class T1, class T2, class TR>
   static void multiply(const T1 *buffer1, const T2 *buffer2, TR *result, int length);
 
-  /** Writes the element-wise negation of the source buffer into the destination buffer. */
+  /** Writes the element-wise negation of the source buffer into the destination buffer, i.e flips 
+  the signs. */
   template<class T>
   static void negate(const T *source, T *destination, int length);
+
+  /** Like negate but flips only signs of elements with even indices. */
+  template<class T>
+  static void negateEven(const T *source, T *destination, int length);
+  // needs test
+
+  /** Like negate but flips only signs of elements with odd indices. */
+  template<class T>
+  static void negateOdd(const T *source, T *destination, int length);
+  // needs test
+
 
   /** Normalizes the maximum absolute value of the passed array by multiplying the whole array 
   through by "maximum"/maxAbs(buffer) - where "maximum" is the passed argument and maxAbs(buffer)
@@ -761,6 +796,9 @@ public:
   /** Swaps the contents of of buffer1 and buffer2 using an auxiliary buffer bufferTmp. All buffers
   are assumed to have a size of sizeInBytes. */
   static void swapDataBuffers(void *buffer1, void *buffer2, void *bufferTmp, int sizeInBytes);
+  // rename to swapContent, make a version that operates in place. maybe this function should not
+  // be in rsArrayTools - the void-pointers and byte-size do not really follow the general 
+  // pattern here
 
   /** Applies an affine tranform y = a*x + b to the array x, where a and b are chosen such that the
   transformed values span a range from targetMin to targetMax. Note that this works only, if the
@@ -886,6 +924,16 @@ inline void rsArrayTools::copy(const T *source, T *destination, const int length
 // for very small arrays, the loop is actually faster? -> do benchmarks
 // see here, around 50min:  https://www.youtube.com/watch?v=ZeU6OPaGxwM
 
+template <class T>
+inline bool rsArrayTools::contains(const T *buffer, const int length, const T elementToFind)
+{
+  for(int i = 0; i < length; i++) {
+    if(buffer[i] == elementToFind)
+      return true; }
+  return false;
+  //return (rsFindFirstOccurrenceOf(buffer, length, elementToFind) != -1);
+}
+
 template <class T1, class T2>
 inline void rsArrayTools::convert(const T1 *source, T2 *destination, const int length)
 {
@@ -940,6 +988,12 @@ inline bool rsArrayTools::equal(const T *buffer1, const T *buffer2, const int le
   return true;
 }
 
+template<class T>
+T rsArrayTools::euclideanNorm(const T* x, int N)
+{
+  return sqrt(rsArrayTools::sumOfSquares(x, N));
+}
+
 template<class T, class F>
 inline void rsArrayTools::fill(T* a, int N, F indexToValueFunction)
 {
@@ -989,6 +1043,29 @@ inline int rsArrayTools::findMaxAbs(const T *buffer, int length)
   return maxIndex;
 }
 
+template<class T>
+int rsArrayTools::findSplitIndex(const T* A, int N, T key)
+{
+  rsAssert(isSortedAscending(A, N), "array must be sorted");
+  int imin = 0;
+  int imax = N-1;
+
+  if(A[imax] < key) // new - needs tests
+    return N;
+
+  while( imin < imax ) {
+    int imid = imin/2 + imax/2;
+    //rsAssert(imid < imax); // only for debug
+    if( A[imid] < key )
+      imin = imid + 1;
+    else
+      imax = imid;
+  }
+  return imin;
+}
+// compare to this: https://en.wikipedia.org/wiki/Binary_search_algorithm
+// what about RSLib? look, if we have something like hat there already
+
 template <class T>
 inline bool rsArrayTools::isAllZeros(const T *buffer, int length)
 {
@@ -1021,6 +1098,17 @@ bool rsArrayTools::isPeakOrPlateau(const T *x, int n)
   if(x[n] >= x[n-1] && x[n] >= x[n+1])
     return true;
   return false;
+}
+
+template <class T>
+bool rsArrayTools::isSortedAscending(const T *buffer, int length)
+{
+  for(int i = 0; i < length-1; i++) 
+  {
+    //if(!(buffer[i] <= buffer[i+1])) return false; // old, requires, <=
+    if(buffer[i+1] < buffer[i]) return false; // new, requires only < to be implemented
+  }
+  return true;
 }
 
 template<class T>

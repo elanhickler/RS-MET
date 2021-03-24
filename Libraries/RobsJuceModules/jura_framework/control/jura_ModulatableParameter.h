@@ -16,7 +16,7 @@ How to use it:
 Client code that wants to use the modulation system for plugin parameters must do the following 
 things:
 
--derive its AudioModule from ModulatableAudioModule (or from a subclass therof)
+-derive its AudioModule from ModulatableAudioModule (or from a subclass thereof)
 -somewhere have a ModulationManager object lying around, a pointer to that object should be passed
  to the constructor call of the ModulatableAudioModule baseclass
 -use objects of type ModulatableParameter for its parameters
@@ -95,17 +95,17 @@ Parameter <- MetaControlledParameter <- ModulatableParameter <- PolyphonicParame
 
 ToDo:
 -It doesn't work in Elan's SpiralGenerator - why? maybe it has to do with creation order? There,
- the modulators whould modulate parameters of their parent module, in chainer it's the sibling
+ the modulators whould modulate parameters of their parent module, in ToolChain it's the sibling
  modules - and no sources or targets are created in the constructor
  Solution:
  -call setModulationManager in constructor b4 creating sources and targets
  -..
 -figure out what happens if the user changes the range of depthParam - how will this affect the 
  meta-value, how can we make sure that the depth parameter is always consistent with its attached 
- metaparameter? how its patch recall affected?
+ metaparameter? how is patch recall affected?
 -optimize, where possible - maybe the scaler can be multiplied into the depth (maybe use a 
  scaledDepth member)
- -maybe the ModulationManager shhould maintain an array usedSources and itereate only over that in
+ -maybe the ModulationManager should maintain an array usedSources and iterate only over that in
   applyModulations (similar to the treatment of affectedTargets - maybe call the arrays 
   connectedTargets and connectedSources to make the parallelism obvious)
 -let the depth be controlled by key and/or velocity - or better, make key and vel available as
@@ -145,18 +145,12 @@ public:
 
   /** Sets up the ModulationManager that should be used for registering ModulationSources and 
   ModulationTargets. Should be called sometime soon after construction. */
-  virtual void setModulationManager(ModulationManager* managerToUse)
-  {
-    modManager = managerToUse;
-  }
+  virtual void setModulationManager(ModulationManager* managerToUse) { modManager = managerToUse; }
   // maybe get rid of this and demand it to be passed to the constructor
 
   /** Returns a pointer to the ModulationManager object that is used for registering 
   ModulationSources and ModulationTargets. */
-  ModulationManager* getModulationManager()
-  {
-    return modManager;
-  }
+  ModulationManager* getModulationManager() { return modManager; }
 
   /** Registers the given ModulationSource to make it available to ModulationTargets. */
   void registerModulationSource(ModulationSource* source);
@@ -189,7 +183,7 @@ protected:
   static std::vector<ModulationConnection*> dummyConnections;
   // These are empty dummy arrays to which references will be returned by 
   // getAvailableModulationSources/Targets/getModulationConnections in case our modManager is a 
-  // nullptr.  This is somehow ugly design, maybe use the "Null Object" pattern instead:
+  // nullptr. This is somehow ugly design, maybe use the "Null Object" pattern instead:
   // https://sourcemaking.com/design_patterns/null_object
   // somewhere, we should have a default "null" ModulationManager object lying around to which
   // our pointer is initialized
@@ -208,61 +202,72 @@ public:
 
   /** Constructor */
   ModulationSource(ModulationManager* managerToUse = nullptr) 
-    : ModulationParticipant(managerToUse) {}
+    : ModulationParticipant(managerToUse) { }
 
   /** Destructor */
   virtual ~ModulationSource();
 
-  /** Should be overriden by subclasses to update the "modValue" member variable per sample. It 
-  should assign modValue to the output signal value of the modulator. 
-  NOT ANYMORE !
-  // previously, this function was required to be overriden, but now you must override
-  // getModulatorOutputSample instead - it's better design to let the framework take care of 
-  // where the value is stored - it allows me also to make debug checks on the value  */
-  //virtual void updateModulationValue() = 0;
-  virtual void updateModulationValue() final 
-  { 
-    modValue = getModulatorOutputSample(); 
-    //jassert(RAPT::rsIsFiniteNumber(modValue));
-  }
-  // when the dust settles, delete these comments
 
   /** Override this function in your subclass to produce one modulator output sample at a time. */
-  virtual double getModulatorOutputSample() = 0;
+  virtual double renderModulation() = 0;
+  // was formerly getModulatorOutputSample - but the old name was ambiguous with 
+  // getModulationValue, the getter for the modulation signal after it has been rendered, 
+  // especially in the polyphonic subclass
+
+  /** This is called per sample from the ModulationManager and it updates our modValue member 
+  variable by calling the virtual renderModulation() function (that subclasses must override) and 
+  using its output for the modValue. The rsVoiceManager parameter is irrelevant in this class here 
+  but it becomes relevant in the ModulationSourcePoly subclass, where we override this method in 
+  order to update the modulator outputs for all active voices, so the voice manager must be already
+  included in the function signature here. */
+  virtual void updateModulationValue(rsVoiceManager* voiceManager) 
+  { modValue = renderModulation(); }
+  // maybe rename - the singular "Value" part does not apply anymore for the poly subclass which
+  // updates all values for all voices - maybe updateModulationOutput
+  // why is this virtual? this is not supposed to be overriden
 
   /** Sets up a name for this ModulationSource. This should be unique among all the available 
   ModulationSource names, so it can be used to identify the source in state recall. */
   void setModulationSourceName(const juce::String& newName) { modSourceName = newName; }
-
-  /** Returns the name of this ModulationSource. This is the (supposed to be unique) name that will
-  used for identifying the source state recall. */
-  juce::String getModulationSourceName() const { return modSourceName; }
+  // todo: maybe in debug mode, assert that the name is unique (requires iterating through all 
+  // already registered sources and comaring the name)
 
   /** Sets a name that should be used in dropdown list when connecting a mod-source. If you don't
   set this up, the name that was set by setModulationSourceName will be used by default. */
   void setModulationSourceDisplayName(const juce::String& newName) { displayName = newName; }
 
+  /** Returns the name of this ModulationSource. This is the (supposed to be unique) name that will
+  used for identifying the source state recall. */
+  juce::String getModulationSourceName() const { return modSourceName; }
+
   /** Returns the name that should be used to identify the source in the dropdown menu on the gui.
   This may potentially be different from the name used for state recall. */
   juce::String getModulationSourceDisplayName() const;
 
-  /** Returns true, if this source is connected to at least one ModulationTarget. */
+  /** Returns true, if this source is connected to at least one ModulationTarget. Currently, this 
+  is quite expensive to call (requires to loop through the connections). I think, that's acceptable
+  at the momen because it's not supposed to be called often (like, per sample). If that situation 
+  changes, it may be optimized by using a numConnectedTargets member just like ModulationTarget has
+  a numConenctedSources member. */
   bool hasConnectedTargets() const;
+
+  /** Returns the current output value of the modulation source. This is supposed to be called 
+  after updateModulationValue has been called. */
+  inline double getModulationValue() const { return modValue; }
+
+  /** This is a provision for implementing polyphony in subclass ModulationSourcePoly. There, it 
+  returns the modulator output for a given voice. Here, we just return the same value for all 
+  voices, because this baseclass is only monophonic and when a monophonic modulator is asked for a
+  voice output, it makes most sense to just use the same value for all voices. */
+  virtual double getVoiceModulationValue(int voiceIndex) const { return modValue; }
 
 protected:
 
-  double modValue = 0;  
-  // maybe use a std::vector to support polyphony already here - obviates subclass 
-  // ModulationSourcePoly which would make some things easier - when then AudioModulePoly is 
-  // realized as a mix-in class, then polyphonic modulator classes could be realized by 
-  // subclassing their monophonic counterparts (just by mixing in the AudioModulePoly class) - 
-  // without any issues with virtual inheritance ...but they would still need to delete the 
-  // monophonic parameters and replace them by polyphonic ones
+  double modValue = 0;
 
   juce::String modSourceName = "ModulationSource";
   juce::String displayName   = "";
 
-  friend class ModulationConnection;
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationSource)
 };
 
@@ -277,21 +282,25 @@ public:
 
   /** Constructor */
   ModulationTarget(ModulationManager* managerToUse = nullptr) 
-    : ModulationParticipant(managerToUse) {}
+    : ModulationParticipant(managerToUse) { }
 
   /** Destructor */
   virtual ~ModulationTarget();
 
-  /** Must be overriden by subclasses to do whatever they need to do after our modulatedValue has 
+  /** Must be overriden by subclasses to do whatever they need to do after a modulatedValue has 
   been computed (for example, ModulatableParameter invokes the setter-callback which in turn 
   updates the corresponding value in the core dsp algorithm). */
-  virtual void doModulationUpdate()
+  virtual void doModulationUpdate(double modulatedValue)
   {
-    // we need an empty baseclass implementation because in the destructor of a plugin, 
+    // We need an empty baseclass implementation because in the destructor of a plugin, 
     // doModulationUpdate would otherwise (in case of a purely virtual function) get called with a 
     // null-reference (or something), in ModulationManager::removeConnection when the modulateble 
-    // parameter deletes itself
+    // parameter deletes itself. ToDo: figure out and document why this is the case
   }
+
+  /** Like doModulationUpdate, but for polyphonic modulations. Overriden in 
+  ModuldatableParameterPoly. Monophonic modulation targets can ignore this. */
+  virtual void doVoiceModulationUpdate(double modulatedValue, int voiceIndex) { }
 
 
   /** \name Setup */
@@ -310,6 +319,7 @@ public:
     // otherwise the modulations don't work anymore, because the modulatedValue is reset after 
     // modulations have been applied. It's a bit hacky but probably needs to be taken into account
     // when designing a parameter smoother for jura.
+    // do we also need to set more values in the array in the polyphonic case?
   }
 
   /** Adds a ModulationSource to this ModulationTarget. The amount of modulation is initially 0. */
@@ -415,18 +425,33 @@ public:
     return unmodulatedValue;
   }
 
+  /** Returns a pointer to the modulated value to facilitate accumulation of the contributions 
+  from all the connections */
+  inline double* getPointerToModulatedValue() { return &modulatedValue; }
+
 
 protected:
 
   double unmodulatedValue = 0;
-  double modulatedValue = 0;
+  double modulatedValue   = 0; 
   double rangeMin = -INF, rangeMax = INF; 
   double defaultDepthMin = -1, defaultDepthMax = 1;
   double initialDepth = 0.0;
   int    defaultModMode = 0; // absolute
+  int    numConnectedSources = 0;
 
-  friend class ModulationConnection;
-  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationTarget)
+  friend class ModulationManager;
+  friend class ModulationManagerPoly; 
+  // maybe get rid by providing accessors
+
+  // ToDo:
+  // -Maybe we don't need to store the modulatedValue here. This oculd perhaps be handled by the 
+  //  ModulationManager as a local variable, quite similar to what we do with the modValues array
+  //  ModulationManagerPoly.
+  // -Maybe it makes sense to keep track of the connected source via a numConnectedSources 
+  //  variable....
+
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationTarget);
 };
 
 //=================================================================================================
@@ -448,6 +473,7 @@ public:
     EXPONENTIAL,     // u * 2^(d*m) - u
     MULTIPLICATIVE   // u * m^d     - u
   };
+  // ToDo: use an enum class
 
   /** Constructor. You should pass a ModulationSource and a ModulationTarget. If you want to enable
   meta-control for the modulation-depth associated with the connection, you may pass the pointer to
@@ -464,15 +490,14 @@ public:
   that is associated with the depth. */
   void setDepth(double newDepth)
   {
-    depthParam->setValue(newDepth, true, true);
+    depthParam->setValue(newDepth, true, true); // the 2nd true triggers the callback call which 
+                                                // typically updates the dsp object (i think)
     // modManager->modulationDepthChanged(this);
   }
 
   /** Sets the parameter range and value of the modulation depths. */
   void setDepthRangeAndValue(double newMin, double newMax, double newValue)
-  {
-    depthParam->setRangeAndValue(newMin, newMax, newValue, true, true);
-  }
+  { depthParam->setRangeAndValue(newMin, newMax, newValue, true, true); }
 
   /** Sets the mode in which this connection should apply the modulation source output value to the
   modualtion target. @see modModes. */
@@ -484,12 +509,13 @@ public:
   /** Returns the Parameter object that controls the amount of modulation */
   MetaControlledParameter* getDepthParameter() const { return depthParam; }
 
-  /** Applies the source-value to the target-value, taking into account the modulation depth. */
-  inline void apply()
+
+  /** Given a modulator output value m, a modulatio depth d and an unmodulated parameter value u,
+  this function applies the modulation to the target value t. The mode controls, which formula
+  is used for the application. Factored out common code for applying modulations mono- and 
+  polyphonically. */
+  static inline void apply(double m, double d, double u, double* t, int mode)
   {
-    double m = *sourceValue; // todo: apply map to m, similar to meta-map
-    double d = depth;
-    double u = target->unmodulatedValue;
     double z;
     switch(mode)  // maybe use function pointer instead of switch
     {
@@ -500,14 +526,44 @@ public:
     {
       z = RAPT::rsClip(u * pow(m, d) - u, -1.e100, +1.e100);
       // Multiplicative mode may produce infinity when it gets an input like m=0, d=-1: 0^-1 = 1/0.
-      // That in itself might later be clipped to max target value but if one modulator produces
-      // inf and another one -inf because u is negative in the 2nd, we would get inf-inf = NaN so
-      // we need to clip here already.
+      // That in itself might not be a problem due to later being clipped to the max target value 
+      // but if one modulator produces inf and another one -inf because u is negative in the 2nd, 
+      // we would get inf-inf = NaN so we need to clip here already.
     } break;
     default:             z = 0;
     }
-    *targetValue += z;
+    *t += z;
   }
+  // ToDo:
+  // Maybe have a true multiplicative mode that actually multiplies t by m^d because sometimes 
+  // that's really a desirable behavior. But then the order of the connections becomes relevant, so
+  // we need a means for the user to reorder them. Then, the current faux-multiplicative mode 
+  // should be renamed into something else and the real multiplicative mode should get the name 
+  // "Multiplicative" - that needs to invoke the patch conversion when old patches are loaded...
+  // the real and faux mode should give the same results only if the multiplicative connection
+  // is the first of all (and in particular if its the only connection). Maybe we could have 
+  // another faux mode that uses the depth not as exponent but as scaler...
+
+  /** Applies the source-value to the target-value that is stored in the ModulationTarget object of
+  this connection, taking into account the modulation depth. This "modulatedValue" member of 
+  ModulationTarget is used for monophonic modulations. */
+  inline void apply() const
+  {
+    apply(source->getModulationValue(), depth, target->getUnmodulatedValue(),
+      target->getPointerToModulatedValue(), mode);
+  }
+
+  /** Applies the modulation value of the sources for the given voice index to the target value 
+  where the location of the target value can be controlled by the caller. This is used for 
+  polyphonic modulations, where the target value is not stored in the ModulationTarget object but
+  buffered elesewhere in order to save memory. */
+  inline void applyVoice(double* targetValue, int voiceIndex) const
+  {
+    apply(source->getVoiceModulationValue(voiceIndex), depth, target->getUnmodulatedValue(), 
+      targetValue, mode);
+  }
+  // maybe find a better name
+
 
 
   /** Returns a xml element containing the information about this connection (needed for state 
@@ -515,10 +571,14 @@ public:
   XmlElement* getAsXml(); // should be const
 
   /** Returns a (const) pointer to the source, so you can inquire something about it. */
-  const ModulationSource* getSource() { return source; }
+  const ModulationSource* getSource() const { return source; }
 
   /** Returns a (const) pointer to the target, so you can inquire something about it. */
-  const ModulationTarget* getTarget() { return target; }
+  const ModulationTarget* getTarget() const { return target; }
+
+  /** Returns a (non-const) pointer to the target, so you can do stuff with it, like invoking the
+  callbacks */
+  ModulationTarget* getTarget() { return target; }
 
 protected:
 
@@ -529,8 +589,6 @@ protected:
 
   ModulationSource* source;
   ModulationTarget* target;
-  double* sourceValue;       // pointer to modulation source output signal
-  double* targetValue;       // pointer to target value
   double depth;              // modulation depth
   int mode = ABSOLUTE;       // application mode for modulation signal
 
@@ -540,7 +598,7 @@ protected:
   friend class ModulationSource;
   friend class ModulationTarget;
   friend class ModulationManager;
-  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationConnection) 
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationConnection);
 };
 
 //=================================================================================================
@@ -571,7 +629,7 @@ public:
   /** Same as applyModulations() but it doesn't acquire the mutex-lock. This should be used in cases 
   where the caller already has acquired the lock (i.e. it already holds the lock for the same 
   CriticalSection object that was initially passed to our constructor). */
-  void applyModulationsNoLock();
+  virtual void applyModulationsNoLock();
 
 
   /** \name Connection setup */
@@ -595,7 +653,8 @@ public:
   void removeAllConnections();
 
   /** Removes the connection with given index. */
-  void removeConnection(int index);
+  void removeConnection(int index, bool updateAffectTargets);
+  // maybe set updateAffectTargets to true by default
 
   /** Resets all the range limits for all registered modulation targets to +-inf. */
   //void resetAllTargetRangeLimits();
@@ -685,11 +744,19 @@ public:
   depth-parameters of the modulation connections. */
   virtual void setMetaParameterManager(MetaParameterManager* managerToUse);
 
+  /** Sets the voice manager that should be used in the polyphonic case. Can be ignored in for
+  monophonic plugins. */
+  virtual void setVoiceManager(rsVoiceManager* managerToUse);
+
   /** Recalls a state (i.e. all the connections and their settings) from an XmlElement. */
   virtual void setStateFromXml(const XmlElement& xmlState);
 
   /** Returns the state (i.e. all the connections and their settings) in form of an XmlElement. */
   virtual XmlElement* getStateAsXml();
+
+  /** Returns the voice manager that is used for polyphonic modulation, if applicable. */
+  rsVoiceManager* getVoiceManager() const { return voiceManager; }
+
 
   /** Updates our affectedTargets array. Called from the connection-removal functions in order to 
   remove the target from the affectedTargets, in case it has no incoming connections anymore after 
@@ -697,6 +764,17 @@ public:
   void updateAffectedTargetsArray();
 
 protected:
+
+  /** Just appends the given connction to the end of our modulationConnections. Intended to be 
+  overriden by subclass which need to enforce a certain ordering of the connections. */
+  virtual void addConnectionToArray(ModulationConnection* connection)
+  { modulationConnections.push_back(connection); }
+
+  /** Just removes the pointer to the connection at the given index from our modulationConnections
+  array. Intended to be overriden by subclasses which need to perform additional operations when 
+  this happens. */
+  virtual void removeConnectionFromArray(int index)
+  { remove(modulationConnections, index); }
 
   /** Tries to cast the passed ModulationTarget into an ObservableModulationTarget and if this is 
   successful, it sends out the modulation change notifiaction for it. */
@@ -708,7 +786,9 @@ protected:
   std::vector<ModulationConnection*> modulationConnections;
 
   CriticalSection *modLock = nullptr; 
-  MetaParameterManager* metaManager = nullptr; // use a null object instead
+  MetaParameterManager*  metaManager  = nullptr;  // maybe use a null object instead - or maybe not
+
+  rsVoiceManager*        voiceManager = nullptr; // move to poly subclass
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationManager)
 };
@@ -732,7 +812,7 @@ public:
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationTargetObserver)
 };
 
-/** A subclass of ModulationTarget that allows to be monitored by observer objects, for example,
+/** A subclass of ModulationTarget that allows to be monitored by observer objects. For example,
 a slider on a gui could keep track of whether its underlying parameter has modulations applied to 
 it and if so, change its appearance. */
 
@@ -785,23 +865,22 @@ public:
   /** Constructor */
   ModulatableParameter(const juce::String& name, double min = 0.0, double max = 1.0,
     double defaultValue = 0.5, int scaling = LINEAR, double interval = 0.0)
-    : MetaControlledParameter(name, min, max, defaultValue, scaling, interval) {}
+    : MetaControlledParameter(name, min, max, defaultValue, scaling, interval) 
+  {
+    modulatedValue = unmodulatedValue = value;
+  }
 
 
   /** \name Setup */
-  /*
-  virtual void setValue(double newValue, bool sendNotification, bool callCallbacks) override
-  {
-    jassertfalse; // client code should call setNormalizedValue
-    //MetaControlledParameter::setValue(newValue, sendNotification, callCallbacks);
-    //ModulationTarget::setUnmodulatedValue(newValue);
-  }
-  */
 
-  virtual void setNormalizedValue(double newValue, bool sendNotification, 
-    bool callCallbacks) override;
 
-  virtual void setSmoothedValue(double newValue) override;
+  void setNormalizedValue(double newValue, bool sendNotification, bool callCallbacks) override;
+  // Note: setValue is not overriden because the baseclass implementation actually calls the 
+  // overriden setNormalizedValue function from here, so it's enough to override this
+
+  void setSmoothedValue(double newValue) override;
+
+
 
   /** Sets up the pointer to our owner, i.e. the AudioModule that contains this parameter (needed 
   for unique identification of this parameter in the tree of AudioModules when a state is 
@@ -811,23 +890,24 @@ public:
 
   /** \name Misc */
 
-  /** We suppose that modulatedValue of the ModulationTarget baseclass has already been computed, 
+  /** comment out of date - todo: update
+  We suppose that modulatedValue of the ModulationTarget baseclass has already been computed, 
   such that modulatedValue has a legitimate value with all modulations applied. Here we pull out 
   this modulated value and call our valueChangeCallback with it. The function is supposed to be 
   called per sample for each modulated Parameter. ModulationManager will take care of this. */
-  inline void callCallbackWithModulatedValue()
+  inline void callCallback(double modulatedValue)
   {
     //jassert(RAPT::rsIsFiniteNumber(getModulatedValue()));
     if( valueChangeCallbackDouble != nullptr )
-      valueChangeCallbackDouble->call(getModulatedValue());
+      valueChangeCallbackDouble->call(modulatedValue);
     if( valueChangeCallbackInt != nullptr )
-      valueChangeCallbackInt->call((int)getModulatedValue());
+      valueChangeCallbackInt->call((int)modulatedValue);
   }
 
   /** Overriden to call our callback function with the modulated value. */
-  virtual void doModulationUpdate() override
+  void doModulationUpdate(double modulatedValue) override
   {
-    callCallbackWithModulatedValue();
+    callCallback(modulatedValue);
   }
 
   /** Returns the unique name of this modulation target that is used to identify it in state 
@@ -846,55 +926,183 @@ protected:
 callback, so if you use this callback mechanism, use this class for your parameters */ 
 class JUCE_API ModulatableParameter2 : public ModulatableParameter
 {
-  using ModulatableParameter::ModulatableParameter; // import baseclass constructors
-  virtual void doModulationUpdate() override
+  using ModulatableParameter::ModulatableParameter; // inherit baseclass constructors
+  virtual void doModulationUpdate(double modulatedValue) override
   {
-    valueChangeCallbackFunction(getModulatedValue());
+    valueChangeCallbackFunction(modulatedValue);
   }
 };
 // Elan uses this - eventually, i should probably switch to this too and get rid of all the other
-// callback types in class Parameter
+// callback types in class Parameter, but the current mechanism may actually be more performant 
+// than std::function. Benchmark this first by setting up a realistically complex configuration of
+// modulators and parameters with ModulatableParameter and ModulatableParameter2 and compare their
+// performances.
+
+
+//#################################################################################################
+
+// The polyphonic version of the modulation system
+
+
+class JUCE_API ModulationManagerPoly : public ModulationManager
+{
+
+public:
+
+  ModulationManagerPoly(CriticalSection* lockToUse) : ModulationManager(lockToUse) {}
+
+  /** Overriden to apply the polyphonic modulations as well. */
+  void applyModulationsNoLock() override;
+
+protected:
+
+  /** Applies the modulations for the given voice. Called from applyModulationsNoLock in a loop
+  over the active voices. */
+  void applyVoiceModulations(int voiceIndex);
+
+  /** Overriden to make sure that the connections are in an order that ensures that connections 
+  with the same target are adjacent in the modulationConnections array. This facilitates looping 
+  over connections in applyVoiceModulations for one target at a time. This is needed because here 
+  because we render the modulated values into our modulatedValues array and not in the member 
+  stored in ModulationTarget. 
+  ToDo: maybe do it like this in the monophonic case, too. This would allow to throw away the 
+  modulatedValue member of ModulationTarget. The connections would always be ordered by target, 
+  even in the baseclass, so we would also get rid of the need to override. */
+  void addConnectionToArray(ModulationConnection* connection) override;
+
+  /** Overriden to potentially resize the modulatedValues array and call the per voice callbacks
+  for the active voices, in cases when the last connection from a target is removed. */
+  void removeConnectionFromArray(int index) override;
+
+  /** Storage buffer for the modulated values. Each ModulationTarget that has incoming modulation 
+  connections gets a correpsonding slot in this array here. It serves as a substitute for the 
+  modulatedValue member of the ModulationTarget class (that is used for monophonic modualtions) 
+  when computing and applying the modulations, because we really don't want to have to store an 
+  array in each target because that would starkly increase the memory footprint of a 
+  ModulationTarget object. 
+  ToDo: maybe use the same meachanism for monophonic modulations, too. That would save one byte
+  of storage space (a member of type double) for ModulationTarget objects and the code would be 
+  more consistent.  */
+  std::vector<double> modulatedValues;
+
+
+  int numDistinctActiveTargets = 0;
+  // Isn't that redundant with numAffectedTargets.size() and also modulatedValues.size()? It 
+  // represents the number of targets that are connected...active seems a misnaming since it 
+  // suggest having something to do with active voice which it doesn't. It's the number of 
+  // parameters that are being modulated. figure out and if so, delete it
+
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationManagerPoly)
+};
 
 //=================================================================================================
 
-// the stuff below is under construction - it's for the polyphonic version of the modulation system
+/** Baseclass for polyphonic modulation sources.
+
+...
+
+The rules for applying polyphonic sources to monophonic targets are as follows:
+
+  -If at least one voice is active (i.e. at least one note is playing), the monophonic target 
+   receives the modulation signal from the newest active voice, i.e. the latest triggered note that
+   is still being held.
+  -If no voice is playing, the monophonic target receives whatever your overriden renderModulation
+   function produces. But you don't have to override it in which case it receives zero, because 
+   that's what the inherited baseclass function will then produce. 
+
+So, your subclass is only *required* to override renderVoiceModulation and it *may optionally* 
+also override renderModulation in cases where it's not appropriate to produce a zero modulation 
+when no voice is playing (which, i guess, is uncommon - so mostly it should suffice to override
+renderVoiceModulation -> less boilerplate).
+
+...i'm not sure, if that's the best way to do it - experimentation is needed
+maybe it could also make sense to continue producing the last signal value from the latest voice
+after it was turned of - i.e. always use value of the newest voice, regardless whether this voice 
+is still active or not. but his implies that the sound of a patch will depend on the latest note
+that was ever produced - even after the note has long been died out - that may be bad for sound 
+design: the synth is in a certain state (due to the last played note), the user creates a sound,
+saves it and when they reload it at another day, it will sound different, because the synth is in
+a different state. that would be bad! ..it seems like having a state which depends on the last 
+played note and which affects the sound output is not a good idea.
+
+*/
 
 class JUCE_API ModulationSourcePoly : public ModulationSource
 {
 
 public:
 
-  virtual double getModulatorOutputSample(int voiceIndex) = 0;
-  //virtual double getModulatorOutputSample() = 0;
 
-};
-// maybe it's not a good idea to have such a subclass - it may mess up the class hierarchy - the 
-// baseclass should probably already facilitate polyphony - but the use of it should be optional
-// - like getModulatorOutputSample always takes a voice-index parameter and monophonic 
-// implementations may just ignore it
+  ModulationSourcePoly(ModulationManager* managerToUse = nullptr)
+    : ModulationSource(managerToUse) { }
 
-class JUCE_API ModulationTargetPoly : virtual public ModulationTarget
-  // virtual inheritance, because we need a ModulatableParameterPoly subclass of 
-  // ModulatableParameter - which already has ModulationTarget as baseclass
-  // maybe we should not use "poly" subclasses for ModulationSource/Target but instead have the 
-  // respective member functions/variables already defined in the basclasses ...this would avoid 
-  // the virtual inheritance stuff - which is always a pain) - but it would slightly complicate 
-  // these classes even when polyphony is not needed - we'll see....
-{
 
-public:
+  virtual void setMonophonic(bool shouldBeMonophonic) { monophonic = shouldBeMonophonic; }
+
+
+  /** Must be overriden by subclasses to produce a modulator output sample for the given voice 
+  index. */
+  virtual double renderVoiceModulation(int voiceIndex) = 0;
+
+  /** We override this purely virtual method inherited from ModulationSource here to produce a zero
+  value. This rendering function is invoked when there is no active voice, i.e. no note is playing.
+  If your modulator subclass wants to produce something other than zero in such a case, you may
+  override it in your subclass of ModulationSourcePoly again. */
+  double renderModulation() override { return 0.0; }
+
+
+
+  double getVoiceModulationValue(int voiceIndex) const override
+  { 
+    jassert(voiceIndex >= 0 && voiceIndex < (int)modValues.size());
+    return modValues[voiceIndex]; 
+  }
+
+
+  void updateModulationValue(rsVoiceManager* voiceManager) override
+  { 
+    if(voiceManager == nullptr) {
+      modValue = renderModulation();
+      return; }
+      // This is supposed to happen when either the monophonic ModulationManager baseclass is used
+      // or when ModulationManagerPoly is used but there are currently no active voices (it then
+      // falls back to calling the basclass method)
+
+    jassert(modValues.size() >= voiceManager->getMaxNumVoices());
+    if(!monophonic) {
+      for(int i = 0; i < voiceManager->getNumActiveVoices(); i++)  {
+        int k = voiceManager->getActiveVoiceIndex(i);
+        modValues[k] = renderVoiceModulation(k); }}
+    else {
+      int newestVoice = voiceManager->getNewestActiveVoice();
+      double val = renderVoiceModulation(newestVoice);
+      for(int i = 0; i < voiceManager->getNumActiveVoices(); i++)  {
+        int k = voiceManager->getActiveVoiceIndex(i);
+        modValues[k] = val; }}
+  }
+
+
+  virtual void allocateVoiceOutputPins(rsVoiceManager* voiceManager)
+  {
+    if(voiceManager == nullptr)
+      modValues.resize(0);       // or maybe use size 1? ...nah - array should not be used in this case
+    else
+      modValues.resize(voiceManager->getMaxNumVoices());
+  }
 
 protected:
 
-  std::vector<double> modulatedValues; 
-  // this array is the replacement the single "modulatedValue" member of the monophonic baseclass
+  std::vector<double> modValues; // replaces "modValue" member of monophonic baseclass
+  bool monophonic = false; 
+  // if true, the modulation source should behave as if it was a monophonic one
 
+
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationSourcePoly)
 };
 
+//=================================================================================================
 
-class JUCE_API ModulatableParameterPoly 
-  : public ModulatableParameter, virtual public ModulationTargetPoly
-  // todo: check, if the inheritance order makes a difference - 
+class JUCE_API ModulatableParameterPoly : public ModulatableParameter
 {
 
 public:
@@ -906,6 +1114,18 @@ public:
     : ModulatableParameter(name, min, max, defaultValue, scaling, interval) {}
 
 
+  //void setValue(double newValue, bool sendNotification, bool callCallbacks) override;
+  // called from gui?
+
+  void setNormalizedValue(double newValue, bool sendNotification, bool callCallbacks) override;
+  // called from automation system?
+
+  void setSmoothedValue(double newValue) override;
+  // called from smoothing manager?
+
+
+  void setMonophonic(bool shouldBeMonophonic) { monophonic = shouldBeMonophonic; }
+
 
   void setValueChangeCallbackPoly(std::function<void(double, int)> cb)
   {
@@ -913,29 +1133,69 @@ public:
     valueChangeCallbackPoly = cb;
     //callValueChangeCallbackPoly(value);
   }
+  // maybe make the parameter a const reference
 
-  void callValueChangeCallbackPoly(double value, int voiceIndex)
+
+  bool isMonophonic() const { return monophonic; }
+
+  int getNewestActiveVoice()
   {
-    valueChangeCallbackPoly(value, voiceIndex);
+    ModulationManager* modMan = getModulationManager();    jassert(modMan);
+    rsVoiceManager*  voiceMan = modMan->getVoiceManager(); jassert(voiceMan);
+    return voiceMan->getNewestActiveVoice();
+    // todo: try to optimize this and make it const
   }
 
-  virtual void callValueChangeCallbacks(int numActiveVoices, double* values, int *voiceIndices);
+
+  /** Overriden to call our callback function with the modulated value. */
+  void doVoiceModulationUpdate(double modulatedValue, int voiceIndex) override
+  {
+    jassert(voiceIndex >= 0);
+    if(!monophonic)  // experimental
+      valueChangeCallbackPoly(modulatedValue, voiceIndex);
+    else if(voiceIndex == getNewestActiveVoice())  
+      valueChangeCallbackPoly(modulatedValue, voiceIndex);
+  }
+
+
+  // maybe we also need to override setNormalizedValue, setSmoothedValue? ..but maybe not - these
+  // should modifiers should be baked into the unmodulatedValue before modulation is applied..but:
+  // the per voice callbacks will never get called on parameter changes, when the parameter has no
+  // connected modulator. maybe we should call them for all active voices there ourselves
 
 
   virtual juce::String getModulationTargetName() override
   {
     return ModulatableParameter::getModulationTargetName();
   }
-  // idk, why we don't inherit that method
+  // idk, why we don't inherit that method -> figure out
+
+  /** Calls the value change callback for the given voice with the unmodulated value. This is 
+  needed when a new note was triggered and the parameter has no connected modulation sources. 
+  Called from AudioModulePoly::noteOn. */
+  void callCallbackForVoice(int voiceIndex)
+  { valueChangeCallbackPoly(modulatedValue, voiceIndex); }
+
+  /** Calls the value change callback for all curently active voices with the unmodulated value. 
+  This is needed when the parameter was changed on the GUI when it has no connected modulation 
+  sources. Called from our override setValue etc. methods. */
+  void callCallbacksForActiveVoices();
 
 
 protected:
+
+
 
   //typedef GenericMemberFunctionCallback1<void, double> SetValueCallback;
   //std::vector<SetValueCallback*> valueChangeCallbacks;
   // for testing, we only use a "double" callback - it's very ugly design in Parameter, to have 
   // pointers to all 3 kinds of callbacks (double, int, bool) - maybe refactor and/or templatize 
-  // the design...or maybe just use std::function, as Elan does
+  // the design...or maybe just use std::function, as Elan does - but before doing such a switch, 
+  // figure out if the old way is more performant - if that's the case, it may be better to keep 
+  // it - and it may actually even better to not use std::function here, too. -> Do performance 
+  // tests that compare ModulatableParameter with ModulatableParameter2. The higher memory cost
+  // for std::function is probably irrelevant because Parameter is already quite heavyweight 
+  // anyway...da macht das biﬂchen mehr den kohl auch nicht mehr fett
 
   //typedef std::function<void(double)> SetValueCallback;
   //std::vector<SetValueCallback*> valueChangeCallbacks;
@@ -947,6 +1207,9 @@ protected:
 
   std::function<void(double, int)> valueChangeCallbackPoly;
 
+  bool monophonic = false; 
+  // if true, the modulation target should behave as if it was a monophonic one
+
 
 private:
 
@@ -956,7 +1219,6 @@ private:
 
 
   //GenericMemberFunctionCallback1<void, double> *valueChangeCallbackDouble
-
 
 };
 // -maybe it should have its own callCallbacks function that takes the voice index as second 
@@ -980,18 +1242,10 @@ private:
 //  -maybe have an calleeArray - actually, we just need to augment SpecificMemberFunctionCallback1 
 //   by a numCallees field
 
-
-// i think, a special ModulationConnection (sub)class is not needed for polyphony - we can use the
-// ame class as in the monophonic case
-
-class JUCE_API ModulationManagerPoly : public ModulationManager
-{
-
-};
-
-
-
-
-
+// see:
+// https://github.com/RobinSchmidt/RS-MET/wiki/The-Modulation-System
+// https://github.com/RobinSchmidt/RS-MET/issues/65
+// https://github.com/RobinSchmidt/RS-MET/issues/269
+// https://github.com/RobinSchmidt/RS-MET/discussions/312
 
 #endif

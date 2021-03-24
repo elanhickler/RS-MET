@@ -32,6 +32,23 @@ bool rsAnyOf(const std::vector<T>& v, UnaryPredicate p)
   return std::any_of(v.cbegin(), v.cend(), p);
 }
 
+/** Returns a new vector which conatins elements where the function f is applied to each 
+corresponding element in the input vector v. The function f should be a function pointer. 
+Usage example:
+
+  std::vector<double> y = rsApplyFunction(x, &log);
+
+to get the logarithms of all values in a vector x of double precision numbers. */
+template<class T>
+std::vector<T> rsApplyFunction(const std::vector<T>& v, T (*f) (T))
+{
+  std::vector<T> r(v.size());
+  for(size_t i = 0; i < r.size(); i++)
+    r[i] = f(v[i]);
+  return r;
+}
+// todo: can this be generalized to any kind of callable f by using a 2nd template parameter F for
+// the function type?
 
 template<class T>
 inline std::vector<T> rsConstantVector(size_t size, T value)
@@ -41,6 +58,40 @@ inline std::vector<T> rsConstantVector(size_t size, T value)
     v[i] = value;
   return v;
 }
+
+/** Copies data from scr to dst. Both must have the same size. */
+template<class T>
+void rsCopy(const std::vector<T>& src, std::vector<T>& dst)
+{
+  rsAssert(src.size() == dst.size());
+  rsArrayTools::copy(&src[0], &dst[0], (int)src.size());
+}
+
+/** For a vector v of pointers to objects, this functions deletes all the objects. */
+template<class T>
+inline void rsDeleteObjects(const std::vector<T*>& v)
+{
+  for(size_t i = 0; i < v.size(); i++)
+    delete v[i];
+}
+
+/** Calls rsDeleteObjects and clears the vector. */
+template<class T>
+inline void rsDeleteObjectsAndClear(const std::vector<T*>& v)
+{
+  rsDeleteObjects(v);
+  v.clear();
+}
+
+/** Like rsDeleteObjects but additionally sets the pointers to nullptr. */
+template<class T>
+inline void rsDeleteObjectsAndNull(const std::vector<T*>& v)
+{
+  for(size_t i = 0; i < v.size(); i++) {
+    delete v[i];
+    v[i] = nullptr; }
+}
+
 
 template<class T>
 inline size_t rsSize(const std::vector<T>& v)
@@ -139,7 +190,11 @@ typename std::vector<T>::iterator rsInsertSorted(std::vector<T>& v, T const& x)
 }
 // https://stackoverflow.com/questions/15843525/how-do-you-insert-the-value-in-a-sorted-vector
 
-
+template<class T>
+inline void rsNegate(std::vector<T>& v)
+{
+  rsArrayTools::negate(&v[0], &v[0], (int) v.size());
+}
 
 /** Wraps iterator syntax to simplify calls to std::none_of. */
 template<class T, class UnaryPredicate >
@@ -415,6 +470,20 @@ bool rsIsCloseTo(const std::vector<T>& x, const std::vector<T>& y, T tol)
   //}
   //return max;
 
+/** Returns the first index for which vector v has a nonzero value or -1 if all values are zero. */
+template<class T>
+int rsIndexOfFirstNonZero(const std::vector<T>& v)
+{
+  return rsArrayTools::firstIndexWithNonZeroValue(&v[0], (int)v.size()); 
+  // todo: rename that to rsIndexOfFirstNonZero, too -> shorter and consistent
+}
+
+/** Returns the number of nonzero values in the vector v. */
+template<class T>
+int rsNumNonZeros(const std::vector<T>& v)
+{
+  return rsArrayTools::numNonZeros(&v[0], (int)v.size()); 
+}
 
 template<class T>
 T rsSum(const std::vector<T>& x)
@@ -468,6 +537,22 @@ inline void rsCopyToVector(const T* a, int N, std::vector<T>& v)
     v[i] = a[i];
 }
 
+// ...hmm - defining operators for std::vector could clash with other libraries that do the same
+// ...maybe i should use a wrapper rsArray or rsVector that wraps std::vector and has the same 
+// interface (plus soem extra stuff) - maybe we should wrap it into an #ifdef 
+// RS_USE_STD_VECTOR_OPERATORS
+
+
+/** Unary minus for std::vector. Negates all elements. */
+template<class T>
+inline std::vector<T> operator-(const std::vector<T>& v)
+{
+  std::vector<T> result(v.size());
+  for(size_t i = 0; i < v.size(); i++)
+    result[i] = -v[i];
+  return result;
+}
+
 /** Multiplies a scalar and a vector. */
 template<class T>
 inline std::vector<T> operator*(const T& x, const std::vector<T>& v)
@@ -477,6 +562,17 @@ inline std::vector<T> operator*(const T& x, const std::vector<T>& v)
     result[i] = x * v[i];
   return result;
 }
+
+/** Multiplies a vector and a scalar. */
+template<class T>
+inline std::vector<T> operator*(const std::vector<T>& v, const T& x)
+{
+  std::vector<T> result(v.size());
+  for(size_t i = 0; i < v.size(); i++)
+    result[i] = x * v[i];
+  return result;
+}
+
 
 /** Divides a vector by a scalar. */
 template<class T>

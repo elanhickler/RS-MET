@@ -115,6 +115,9 @@ public:
   /** Returns true if given x-coordinate is in the keyboard column, false otherwise). */
   bool isInKeyboardColumn(float xCoordinate);
 
+  /** Returns the height of one row in the top lane (for accent, slide, etc.) */
+  int getTopLaneHeight() const { return (int) topLaneHeight; } // why is this a fdloat?
+
   //---------------------------------------------------------------------------------------------
   // callbacks:
 
@@ -180,11 +183,31 @@ protected:
   AcidSequencerAudioModule *acidSequencerModuleToEdit;
   AcidPatternEditor        *patternEditor;
 
-  RTextField *modeLabel, *shiftLabel;
+  RTextField *modeLabel, *shiftLabel;  // shiftLabel not use anymore
   RComboBox  *modeBox;
   RSlider    *stepLengthSlider;
   RButton    *shiftLeftButton, *shiftRightButton;
   RButton    *lockButton;  // prevents the sequencer data from being changed and preset-change
+
+  // new:
+  RButton    *shiftAccentsLeftButton, *shiftAccentsRightButton;
+  RButton    *shiftSlidesLeftButton,  *shiftSlidesRightButton;
+  RButton    *shiftNotesLeftButton,   *shiftNotesRightButton;
+  RButton    *shiftOctavesLeftButton, *shiftOctavesRightButton;
+
+  RButton    *reverseAllButton;
+  RButton    *reverseAccentsButton;
+  RButton    *reverseSlidesButton;
+  RButton    *reverseNotesButton;
+  RButton    *reverseOctavesButton;
+  RButton    *swapAccentsSlidesButton;
+  RButton    *xorAccentsSlidesButton;
+  RButton    *xorSlidesAccentsButton;
+
+  RButton    *invertAccentsButton;
+  RButton    *invertSlidesButton;
+  RButton    *invertOctavesButton;
+
 
   juce_UseDebuggingNewOperator;
 };

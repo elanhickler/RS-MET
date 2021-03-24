@@ -67,8 +67,44 @@ namespace rosic
     void setStepLength(double newStepLength) 
     { patterns[activePattern].setStepLength(newStepLength); }
 
-    /** Circularly shifts the active pattern by the given number of steps. */
-    void circularShift(int numSteps) { patterns[activePattern].circularShift(numSteps); }
+    /** Circularly shifts the whole active pattern by the given number of steps. */
+    void circularShiftAll(int numSteps) { patterns[activePattern].circularShiftAll(numSteps); }
+
+    /** Circularly shifts the accents of the active pattern by the given number of steps. */
+    void circularShiftAccents(int numSteps) 
+    { patterns[activePattern].circularShiftAccents(numSteps); }
+
+    /** Circularly shifts the slides of the active pattern by the given number of steps. */
+    void circularShiftSlides(int numSteps) 
+    { patterns[activePattern].circularShiftSlides(numSteps); }
+
+    /** Circularly shifts the octaves of the active pattern by the given number of steps. */
+    void circularShiftOctaves(int numSteps) 
+    { patterns[activePattern].circularShiftOctaves(numSteps); }
+
+    /** Circularly shifts the notes of the active pattern by the given number of steps. */
+    void circularShiftNotes(int numSteps) 
+    { patterns[activePattern].circularShiftNotes(numSteps); }
+
+
+    void reverseAll()     { patterns[activePattern].reverseAll();     }
+    void reverseAccents() { patterns[activePattern].reverseAccents(); }
+    void reverseSlides()  { patterns[activePattern].reverseSlides();  }
+    void reverseOctaves() { patterns[activePattern].reverseOctaves(); }
+    void reverseNotes()   { patterns[activePattern].reverseNotes();   }
+
+
+    void invertAccents() { patterns[activePattern].invertAccents();  }
+    void invertSlides()  { patterns[activePattern].invertSlides();   }
+    void invertOctaves() { patterns[activePattern].invertOctaves();  }
+
+    // implement logical not for accents and slides, invert for octaves
+
+
+    void swapAccentsWithSlides() { patterns[activePattern].swapAccentsWithSlides(); }
+    void xorAccentsWithSlides()  { patterns[activePattern].xorAccentsWithSlides(); }
+    void xorSlidesWithAccents()  { patterns[activePattern].xorSlidesWithAccents(); }
+
 
     /** Marks a key (note value from 0...12, where 0 and 12 is a C) as permissible or not. 
     Whenever the pattern currently played requires a key that is not permissible, the sequencer
@@ -78,6 +114,10 @@ namespace rosic
 
     /** Toggles the permissibility of a key on/off. */
     void toggleKeyPermissibility(int key);
+
+    void copyActiveToClipboard();
+
+    void pasteClipboardToActive();
 
     //---------------------------------------------------------------------------------------------
     // inquiry:
@@ -149,8 +189,10 @@ namespace rosic
 
   protected:
 
-    static const int numPatterns = 16;
+    static const int numPatterns = 16; // maybe use 128 and let use selct midi controller
     AcidPattern patterns[numPatterns];
+    AcidPattern clipboard; 
+    int clipboardLength = 0;
 
     int    activePattern;      // the currently selected pattern
     bool   running;            // flag to indicate that sequencer is running

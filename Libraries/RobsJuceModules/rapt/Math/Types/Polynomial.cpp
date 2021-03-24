@@ -147,7 +147,9 @@ void rsPolynomial<T>::evaluateWithDerivatives(const T& x, const T *a, int degree
     results[0] = results[0]*x + a[i];
   }
   rsArrayTools::multiply(&results[2], &rsFactorials[2], &results[2], numDerivatives-1);
-  // todo: maybe lift the restriction to < 32 derivatives by computing the factorials on the fly
+  // todo: maybe lift the restriction to < 32 derivatives by computing additional factorials on 
+  // the fly, if needed - but we need to be careful about overflow - i think 31! will already 
+  // overflow int64...yep...easily
 }
 
 template<class T>
@@ -155,21 +157,33 @@ template<class R>
 R rsPolynomial<T>::evaluateWithTwoDerivativesAndError(
   const std::complex<R>* a, int degree, std::complex<R> z, std::complex<R>* P)
 {
-  P[0] = a[degree];                  // P(z)
-  P[1] = std::complex<R>(0.0, 0.0);  // P'(z)
-  P[2] = std::complex<R>(0.0, 0.0);  // P''(z)
-  T err = abs(P[0]);                 // estimated roundoff error in evaluation of the polynomial
-  T zA  = abs(z);                    // absolute value of z
-  for(int j = degree-1; j >= 0; j--)
-  {
+  P[0] = a[degree];                    // P(z)
+  P[1] = std::complex<R>(R(0), R(0));  // P'(z)
+  P[2] = std::complex<R>(R(0), R(0));  // P''(z)
+  R err = rsAbs(P[0]);                 // estimated roundoff error in evaluation of the polynomial
+  R zA  = rsAbs(z);                    // absolute value of z
+  for(int j = degree-1; j >= 0; j--) {
     P[2] = z * P[2] + P[1];
     P[1] = z * P[1] + P[0];
     P[0] = z * P[0] + a[j];
-    err  = abs(P[0]) + zA*err;
-  }
-  P[2] *= 2.0;
+    err  = abs(P[0]) + zA*err; }
+  P[2] *= R(2);
   return err;
 }
+
+template<class T>
+T rsPolynomial<T>::evaluateIntegral(const T& x, const T* a, int N, T c)
+{
+  T y = a[N] / T(N+1);
+  for(int i = N-1; i >= 0; i--)
+    y = y*x + a[i] / T(i+1);
+  return y*x + c;
+}
+// maybe make a variant that takes lower and upper integration limits a,b - this can be optimized:
+// the final + c can be thrown away and more importantly, the evaluation at a and b can be done 
+// within a single loop where a[i] / T(i+1) needs to be computed only once - in the loop, do:
+//   Ai = a[i] / T(i+1); ya = ya*x + Ai; yb = yb*x + Ai; 
+// where ya, yb are both initialized like y above. then return yb - ya
 
 template<class T>
 T rsPolynomial<T>::evaluateHermite(const T& x, int n)
@@ -283,9 +297,8 @@ template <class T>
 void rsPolynomial<T>::greatestCommonDivisor(
   const T* p, int pDeg, const T* q, int qDeg, T* gcd, int* gcdDeg, T tol)
 {
-
+  rsError("Not yet implemented");
 }
-
 
 template <class T>
 void rsPolynomial<T>::powers(const T* a, int N, T** aPowers, int highestPower)
@@ -299,11 +312,30 @@ void rsPolynomial<T>::powers(const T* a, int N, T** aPowers, int highestPower)
 }
 
 template <class T>
-void rsPolynomial<T>::compose(const T* a, int aN, const T* b, int bN, T* c)
+void rsPolynomial<T>::powers(const T* a, int N, T* aPowers, int highestPower, int stride)
 {
-  int cN = aN*bN;
-  T* an  = new T[cN+1];  // array for the successive powers of a[]
-  an[0]  = T(1);         // initialize to a[]^0
+  //rsError("Not yet tested");
+  rsAssert(stride >= (N+1)*highestPower-1); // is this correct? or N*highestPower + 1
+
+  aPowers[0] = 1;
+  if(highestPower < 1)
+    return;
+  rsArrayTools::copy(a, &aPowers[stride], N+1);
+  for(int k = 2; k <= highestPower; k++)
+    rsArrayTools::convolve(&aPowers[(k-1)*stride], (k-1)*N+1, a, N+1, &aPowers[k*stride]);
+}
+// maybe make a version that assumes a different memory layout with "rows" having lengths:
+// 1, N+1, 2*N+1, 3*N+1, ... i.e. k*N+1 such that each row es exactly long enough for the number
+// of coeffs it holds - the way it's implemented now is convenient, especially when used together
+// with rsMatrix, but wastes memory
+
+template <class T>
+void rsPolynomial<T>::compose(const T* a, int aN, const T* b, int bN, T* c, T* workspace)
+{
+  rsAssert(c != a && c != b, "Does not work in place");
+  int cN = aN*bN;     // degree of c
+  T*  an = workspace; // array for the successive powers of a[]
+  an[0]  = T(1);      // initialize to a[]^0
 
   // accumulation:
   rsArrayTools::fillWithZeros(c, cN+1);
@@ -314,43 +346,81 @@ void rsPolynomial<T>::compose(const T* a, int aN, const T* b, int bN, T* c)
     K += aN;
     for(int k = 0; k < K; k++)
       c[k] += b[n] * an[k]; }
-
-  delete[] an;
-}
-// maybe make a version that uses a workspace
-
-template <class T>
-void rsPolynomial<T>::coeffsForNegativeArgument(const T *a, T *am, int N)
-{
-  T s = 1.0;
-  for(int n = 0; n <= N; n++)
-  {
-    am[n]  = s*a[n];
-    s     *= -1.0;
-  }
 }
 
-// todo: polyCoeffsForScaledArgument: aScaled[n] = a[n] * scaler^n - when the scaler equals -1,
-// it reduces to polyCoeffsForNegativeArgument - this function is superfluous then
+template <class T>
+void rsPolynomial<T>::compose(const T* a, int aN, const T* b, int bN, T* c)
+{
+  int cN = aN*bN;               // degree of c
+  T* an = new T[cN+1];          // allocate array for the successive powers of a[]
+  compose(a, aN, b, bN, c, an); // call workspace based function
+  delete[] an;                  // clean up
+}
+
+template<class T>
+void rsPolynomial<T>::composeLinearWithCubic(T* a, T* c, T b0, T b1)
+{
+  T b02 = b0*b0;
+  T b12 = b1*b1;
+  c[0]  = a[3]*b0*b02 + a[2]*b02 + a[1]*b0 + a[0];
+  c[1]  = T(3)*a[3]*b02*b1 + T(2)*a[2]*b0*b1 + a[1]*b1;
+  c[2]  = T(3)*a[3]*b0*b12 + a[2]*b12;
+  c[3]  = a[3]*b1*b12;
+}
+// We can compute the coeffs of the nested polynomial easily with sage:
+//   var("a0 a1 a2 a3 b0 b1 c0 c1 c2 c3")
+//   a(x) = a0 + a1*x + a2*x^2 + a3*x^3   # outer polynomial
+//   b(x) = b0 + b1*x                     # inner polynomial
+//   c(x) = a(b(x))                       # composed polynomial
+//   (expand(c)).collect(x)
+// which gives:
+//   a3*b1^3*x^3 + a3*b0^3 + a2*b0^2 + (3*a3*b0*b1^2 + a2*b1^2)*x^2 + a1*b0 
+//   + (3*a3*b0^2*b1 + 2*a2*b0*b1 + a1*b1)*x + a0
+// so:
+//   c0 = a3*b0^3 + a2*b0^2 + a1*b0 + a0
+//   c1 = 3*a3*b0^2*b1 + 2*a2*b0*b1 + a1*b1
+//   c2 = 3*a3*b0*b1^2 + a2*b1^2
+//   c3 = a3*b1^3
 
 template <class T>
-void rsPolynomial<T>::coeffsForShiftedArgument(const T *a, T *as, int N, T x0)
+void rsPolynomial<T>::negateArgument(const T *a, T *am, int N)
 {
+  scaleArgument(a, am, N, T(-1));
+}
+
+template <class T>
+void rsPolynomial<T>::scaleArgument(const T* a, T* as, int N, T scaler)
+{
+  T s = T(1);
+  for(int n = 0; n <= N; n++) {
+    as[n] = s*a[n]; 
+    s    *= scaler;  }
+}
+
+template <class T>
+void rsPolynomial<T>::shiftArgument(const T *a, T *as, int N, T x0)
+{
+  T r[2] = { -x0, T(1) };
+  compose(r, 1, a, N, as);
+  return;
+  // todo: provide workspace based version that uses the non-allocating version of compose
+
+
+  // inefficient old implementation - todo: move to prototypes, it's worth to keep the code 
+  // somewhere because it shows the algorithm derived from the binomial theorem:
   rsUint32 Nu = rsUint32(N); // used to fix warnings
   rsUint32 numLines = N+1;
   rsUint32 length   = (numLines*(numLines+1))/2;
   rsUint32 *pt = new rsUint32[length];
   rsCreatePascalTriangle(pt, numLines);
-  T *x0n = new T[N+1];  // +- x0^n
+  T *x0n = new T[N+1];  // +- x0^n, the alternation comes from the minus in (x-x0)^n
   x0n[0] = 1.0;
   for(rsUint32 n = 1; n <= Nu; n++)
     x0n[n] = -x0 * x0n[n-1];
-  for(rsUint32 n = 0; n <= Nu; n++)
-  {
+  for(rsUint32 n = 0; n <= Nu; n++) {
     as[n] = 0.0;
     for(rsUint32 k = n; k <= Nu; k++)
-      as[n] += T(rsPascalTriangle(pt, k, k-n)) * x0n[k-n] * a[k];
-  }
+      as[n] += T(rsPascalTriangle(pt, k, k-n)) * x0n[k-n] * a[k]; }
   delete[] pt;
   delete[] x0n;
 }
@@ -390,6 +460,8 @@ void rsPolynomial<T>::integrateWithPolynomialLimits(
   delete[] A;
   delete[] B;
 }
+// todo: make a workspace based version, keep this as convenience function (or move it to protoypes
+// and provide a convenience function that needs only 1 allocation)
 
 template <class T>
 void rsPolynomial<T>::finiteDifference(const T *a, T *ad, int N, int direction, T h)
@@ -553,9 +625,9 @@ std::complex<R> rsPolynomial<T>::convergeToRootViaLaguerre(
 template<class T>
 T rsPolynomial<T>::rootLinear(const T& a, const T& b)
 {
-  if(a == 0.0) {  // hmm...maybe returning (+-)inf as root would actually be appropriate
+  if(a == T(0)) {  // hmm...maybe returning (+-)inf as root would actually be appropriate
     RS_DEBUG_BREAK;
-    return 0.0;
+    return T(0);
   }
   else
     return -b/a;

@@ -1530,7 +1530,6 @@ std::vector<double> applyDelay(const std::vector<double>& x, double delay)
   return y;
 }
 
-
 void quantileFilterDual()
 {
   double fs = 44100;  // sample rate
@@ -1687,10 +1686,81 @@ void quantileFilterDual()
 
 }
 
+void quantileFilterResonant()
+{
+  // Test the pseudo-resonance for the quantile filter that is introduced by using an additional 
+  // min-max filter
+
+  double fs = 44100;  // sample rate
+  double f1 = 20000;  // filter frequency 1
+  double f2 = 20;     // filter frequency 2
+  double r  = 1.0;    // resonance mix
+  int    N  = 200000; // number of samples
+
+  rsQuantileFilterResonant<double> flt;
+  flt.setSampleRate(fs);
+  flt.setMaxLength(1.0);   // allows for 1 Hz as lowest cutoff (reciprocal of minFreq)
+  //flt.setFrequency(f);
+  flt.setResonanceMix(r);
+
+  // Create input signal:
+  using Vec = std::vector<double>;
+  Vec x = rsRandomVector(N, -0.5, +0.5, 0);  // try sinusoids, too
+
+  rsOnePoleFilter<double, double> lpf;
+  lpf.setSampleRate(fs);
+  lpf.setMode(rsOnePoleFilter<double, double>::LOWPASS_IIT);
+  lpf.setCutoff(f2); // maybe use something else
+  for(int n = 0; n < N; n++)
+    x[n] = lpf.getSample(x[n]);
+
+
+  //rsArrayTools::cumulativeSum(&x[0], &x[0], N);
+
+  Vec f(N);
+  rsArrayTools::fillWithRangeExponential(&f[0], N, f1, f2);
+
+  // produce output signal:
+  Vec y(N);
+  for(int n = 0; n < N; n++)
+  {
+    flt.setFrequency(f[n]);
+    y[n] = flt.getSample(x[n]);
+  }
+
+  //rsPlotVectors(x, y);
+  rosic::writeToMonoWaveFile("ResoQuantileIn.wav",  &x[0], N, 44100);
+  rosic::writeToMonoWaveFile("ResoQuantileOut.wav", &y[0], N, 44100);
+
+  // Observations:
+  // -when creating a sweep, the resonance gets louder for lower frequencies - i think, it's 
+  //  because the min/max values are taken over a longer interval, so the amplitude tends to 
+  //  increase
+  // -maybe the length over which min and max are taken should be a fixed (adjustable) parameter
+  //  that is independent from the filter frequency setting - at least, when the resonance 
+  //  frequency is determined by the bandpass - but that tends to create weird aliasing (alike) 
+  //  artifacts at high resonance frequencies
+  // -for high frequencies, the resonance turns itself into noise
+  //  -maybe it can be counteracted by applying a highpass and amplification that somehow track the 
+  //   filter frequency (and become neutral at lower frequencies)...yes - that seems like a good 
+  //   idea - try f_hp = rsMax(0, f - 2000)....but the appropriate amplification factor may depend
+  //   on the input signal - for white noise, 1 may be appropriate, for brown noise, something
+  //   proportional to frequency is more appropriate
+
+  // Ideas:
+  // -maybe use a bandpass and use max when the output is >= 0 and min otherwise
+  //  -done - that seems promising for a tuned pseudo-resonance
+  //  -the bandwidth can be adjusted by the user
+
+  return;
+}
+
+
 void quantileFilter()
 {
   //quantileFilterElongation();  // tests producing the length L+1 output by length L filter
   //quantileFilterSweep();  // tests non-integer length quatile filter
   //quantileFilterDelay();
-  quantileFilterDual();  // tests the dual-quantile filter (with highpass mode, etc.)
+  //quantileFilterDual();  // tests the dual-quantile filter (with highpass mode, etc.)
+  quantileFilterResonant();
 }

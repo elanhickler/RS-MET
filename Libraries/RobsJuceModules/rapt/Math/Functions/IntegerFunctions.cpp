@@ -140,6 +140,42 @@ void rsGetLineOfPascalTriangle(TUInt *c, TUInt n)
   // maybe this can be optimized by using the symmetry of the Pascal triangle
 }
 
+template<class T>
+void rsNextPascalTriangleLine(const T* x, T* y, int N)
+{
+  rsAssert(N >= 0);
+  T xL = T(1);
+  y[0] = T(1);
+  for(int i = 1; i < N; i++) 
+  { 
+    T xR = x[i]; 
+    y[i] = xL + xR;
+    xL   = xR;  
+  }
+  y[N] = T(1);
+}
+// -maybe this can be optimized using symmetry by doing something like
+//  y[i] = y[i+k] = xL + xR where k depends on i and N - or maybe y[i] = y[N-i] = xL + xR?
+// -maybe generalize to compute coefficients: y[i] = a*xL + b*xR...i think, this computes the coeff
+//  for x^k * y^(n-k) in (a*x + b*y)^n
+
+template<class T>
+void rsPascalTriangleLine(T* y, int N)
+{
+  for(int n = 0; n <= N; n++) 
+    rsNextPascalTriangleLine(y, y, n);
+}
+
+// see: https://en.wikipedia.org/wiki/Pascal%27s_triangle
+// maybe implement also:
+// https://en.wikipedia.org/wiki/Trinomial_triangle
+// https://en.wikipedia.org/wiki/(2,1)-Pascal_triangle
+// https://en.wikipedia.org/wiki/Bell_triangle
+// https://en.wikipedia.org/wiki/Bernoulli%27s_triangle
+// https://en.wikipedia.org/wiki/Leibniz_harmonic_triangle
+// https://en.wikipedia.org/wiki/Eulerian_number#Basic_properties
+
+
 template<class TInt>
 TInt rsLeviCivita(TInt indices[], TInt N)
 {

@@ -34,6 +34,7 @@ void seriesConnectionDecay();
 void waveformFractalization();
 void noise();
 void noiseTriModal();
+void noiseWaveShaped();
 void blit();
 void blep();
 //void blamp();
@@ -58,6 +59,7 @@ void snowFlake();
 void triSawOsc();
 void triSawOscAntiAlias();
 void xoxosOsc();
+void shepardTone();
 
 
 // Graphics Experiments:

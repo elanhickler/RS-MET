@@ -13,7 +13,7 @@ PGCA: Pattern Generation for Computational Art (Stefan and Richard Hollos)
 LSFP: Lindenmayer Systems, Fractals and Plants (Prusinkiewicz, Hanan)
 ABoP: The Algorithmic Beauty of Plants (Prusinkiewicz, Lindenmayer)  */
 
-class Snowflake : public TurtleSource
+class Snowflake : public TurtleSourceAntiAliased
 {
 
 public:
@@ -65,7 +65,7 @@ public:
   {
     if(!commandsReady)
       updateTurtleCommands();
-    TurtleSource::getSampleFrameStereo(outL, outR);
+    TurtleSourceAntiAliased::getSampleFrameStereo(outL, outR);
   }
 
 protected:
@@ -74,7 +74,7 @@ protected:
   void updateTurtleCommands();
 
   LindenmayerSystem lindSys;
-  std::string axiom;
+  std::string axiom;     // maybe rename to seed
   int numIterations = 0; // replace by iteratorString or applicatorString (a string like AAABBAC)
   std::string lindenmayerResult;          // output string of Lindenmayer system
   //std::atomic_bool commandsReady = false; // flag to indicate that "turtleCommands" is up to date

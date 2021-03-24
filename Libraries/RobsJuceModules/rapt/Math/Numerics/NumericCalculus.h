@@ -317,7 +317,9 @@ public:
   // todo: curl - this is more complicated in general N-dimensional space and needs more research. 
   // i think, it should be an anti-symmetrical NxN matrix of differences of partial derivatives.  
   // But how exactly the values should be arranged as matrix elements and which elements get 
-  // negative signs is something that i have not yet figured out....
+  // negative signs is something that i have not yet figured out... see:
+  // https://en.wikipedia.org/wiki/Vector_calculus#Generalizations
+  // https://en.wikipedia.org/wiki/Curl_(mathematics)#Generalizations
 
   //-----------------------------------------------------------------------------------------------
   // \name Data derivatives
@@ -343,14 +345,78 @@ public:
   endpoints compared to simple differences, so it's probably better to use extrapolation. */
   template<class Tx>
   static void derivative(const Tx *x, const T *y, T *yd, int N, bool extrapolateEnds = true);
-  // maybe rename to weightedCentralDifference
-  // provide a version that assumes a regular spacing interval
-  // provide a function to compute the second derivative - maybe by fitting a parabola - this 
-  // paraobala could also be used for an alternative computation of the first derivative
+  // ToDo:
+  // -maybe rename to weightedCentralDifference
+  // -provide a simplified version that assumes a regular spacing interval
+  // -provide a function to compute the second derivative - maybe by fitting a parabola - this 
+  // -paraobala could also be used for an alternative computation of the first derivative
 
   // todo: drag over the code that computes the laplacian for a 2D and 3D function from the 
   // wave-equation simulation in the prototypes folder - maybe provide a 1D version, too - the 
   // 1D, 2D and 3D variants can then be used to simulate strings, membranes and rooms...
+
+
+  /** Numerically estimates partial derivatives into the x- and y-direction of a function u(x,y) 
+  that is defined on an irregular mesh at a particular vertex with index i and stores the result in
+  u_x, u_y. Used internaly in a loop over all vertices in
+  @see gradient2D(const rsGraph<rsVector2D<T>, T>& mesh, const T* u, T* u_x, T* u_y). The 
+  per-vertex code has been factored out to be used in other contexts as well. The u pointer 
+  should point to the begin of the array of function values and *not* to the particular function 
+  value u[i]. The function will reference u[i] and u[j] for j running over all neighbors of vertex 
+  i. The u_x, u_y pointers, on the other hand, should point to the particular locations at index i
+  in the derivative arrays (if used in this context, i.e. if derivate arrays should be computed, 
+  although the main purpose of factoring this function out is to be able to compute the vertex 
+  derivatives locally without allocating arrays for them. In such a context, they may point to 
+  local variables inside some higher level algorithm). */
+  static void gradient2D(const rsGraph<rsVector2D<T>, T>& mesh, const T* u, int i, T* u_x, T* u_y);
+
+  /** Numerically estimates partial derivatives into the x- and y-direction of a function u(x,y) 
+  that is defined on an irregular mesh. This is a preliminary for generalizing finite difference 
+  based solvers for partial differential equations to irregular meshes. The inputs are a mesh of 
+  vertices (represented as a graph in which the data associated with each node represents the 
+  location of the node in the x,y plane and the edges give the connectivity of the vertices) and a
+  std::vector of function values of the function u(x,y). The length of the u-array should match the 
+  number of vertices in the mesh and contain the function values associated with the x,y 
+  coordinates for the respective vertex (i.e. the vertex with the same index). Outputs are the 
+  arrays of estimated partial derivatives of u with respect to x and y (which should also be of 
+  the same length as u) which, taken together, form the gradient. The data stored at the edges are 
+  used as weights in weighted least squares computation of the gradient in which we try to explain
+  the measured directional derivatives via the gradient. It's reasonable to use edge weights 
+  inversely proportional to the distance between the respective vertices - see comments in 
+  implementation for more details. */
+  static void gradient2D(const rsGraph<rsVector2D<T>, T>& mesh, const T* u, T* u_x, T* u_y);
+  // todo: 
+  // -maybe use a Tx template parameter as in derivative
+  // -can this also be used for vector fields by just interpreting the vector field as pair of two
+  //  scalar fields? i think so - if so, explain in the documentation how - just apply the function
+  //  to both component functions
+
+  /** Estimates gradient and Hessian matrix on an irregular mesh. It first computes the gradient 
+  of u using gradient2D and stores the result in u_x, u_y and then computes the gradients of u_x 
+  and u_y and stores the results in u_xx, u_xy and u_yx, u_yy. Mathematically, the mixed 2nd 
+  derivatives u_xy and u_yx are supposed to be the same (by Schwarz's theorem, if u has continuous
+  2nd partial derivatives), but numerically, they may differ due to different approximation errors.
+  (Q: Does it make sense to average them? Will this improve accuracy?) */
+  static void gradientAndHessian2D(const rsGraph<rsVector2D<T>, T>& mesh, const T* u,
+    T* u_x, T* u_y, T* u_xx, T* u_xy, T* u_yx, T* u_yy)
+  {
+    gradient2D(mesh, u,   u_x,  u_y);
+    gradient2D(mesh, u_x, u_xx, u_xy);
+    gradient2D(mesh, u_y, u_yx, u_yy);
+  }
+  // ToDo: 
+  // -figure out, if this can be done more efficiently, especially, when only the Laplacian
+  //  u_xx + u_yy is required (which is the case in the wave-equation, for example)
+  // -maybe rename by adding a qualifier for the estimation algorithm - there are different ways
+  //  to estimate the Hessian
+
+  /** Computes a numerical estimate of the Laplacian of some scalar function u defined on a mesh.
+  The Laplacian is stored in L. It needs a workspace of size 3*N where N is the number of 
+  vertices in the mesh (and therefore also the number of entries in u and L). The algorithm 
+  applies the gradient2D function 3 times. */
+  static void laplacian2D(const rsGraph<rsVector2D<T>, T>& mesh, const T* u, T* L, T* workspace);
+  // ToDo: document the accuracy
+
 
   //-----------------------------------------------------------------------------------------------
   // \name Misc
@@ -407,6 +473,27 @@ public:
   static void hessianTimesVector(const F& f, T* x, T* v, int N, T* Hv, const T* h, T k)
   { std::vector<T> wrk(2*N); hessianTimesVector(f, x, v, N, Hv, h, k, &wrk[0]); }
   // allocates
+
+
+  static void gradient2D(const rsGraph<rsVector2D<T>, T>& mesh, const std::vector<T>& u,
+    std::vector<T>& u_x, std::vector<T>& u_y)
+  {
+    int N = mesh.getNumVertices();
+    rsAssert((int) u.size()   == N);
+    rsAssert((int) u_x.size() == N);
+    rsAssert((int) u_y.size() == N);
+    gradient2D(mesh, &u[0], &u_x[0], &u_y[0]);
+  }
+
+  static void laplacian2D(const rsGraph<rsVector2D<T>, T>& mesh, const T* u, T* L)
+  { std::vector<T> wrk(3*mesh.getNumVertices()); laplacian2D(mesh, u, L, &wrk[0]); }
+  // allocates
+
+  /** Under construction - does not yet work correctly - it is still very inaccurate for irregular
+  meshes. */
+  static void laplacian2D_2(const rsGraph<rsVector2D<T>, T>& mesh, const std::vector<T>& u, 
+    std::vector<T>& L);
+  // needs more tests
 
   // maybe make convenience functions that take a scalar h - they should create temporary array and
   // set all values in it to h

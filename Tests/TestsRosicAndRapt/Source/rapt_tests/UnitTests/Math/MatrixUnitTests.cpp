@@ -725,6 +725,202 @@ bool testKroneckerProduct()
   return res;
 }
 
+bool testSparseMatrix()
+{
+  bool res = true;
+
+  using Vec = std::vector<float>;
+
+  // We create a matrix of the form:
+  // 
+  //      |1 1 0 0 0 0 0 0|
+  //  A = |0 0 1 1 0 0 0 0|
+  //      |0 0 0 0 1 1 0 0|
+  //      |0 0 0 0 0 0 1 1|
+  //
+  // so, it takes an 8-vector as input and produces a 4-vector as output in which each element is
+  // the sum of two consecutive elements from the input.
+
+  rsSparseMatrix<float> A(4, 8); // still the zero matrix
+  Vec x({1,2,3,4,5,6,7,8});      // input vector
+  Vec y({1,2,3,4});              // output vector
+  A.product(&x[0], &y[0]);  res &= y == Vec({0,0,0,0}); 
+
+  // Now build up the actual matrix in a kind of "random" manner. The nonzero (i.e. one) elements 
+  // are at positions: (0,0),(0,1),(1,2),(1,3),(2,4),(2,5),(3,6),(3,7):
+  A.set(1, 2, 1.f);
+  A.set(2, 5, 1.f);
+  A.set(0, 0, 1.f);
+  A.set(0, 1, 1.f);
+  A.set(3, 6, 1.f);
+  A.set(1, 3, 1.f);
+  A.set(2, 4, 1.f);
+  A.set(3, 7, 1.f);
+
+  // Test the multiplication with the new matrix again:
+  A.product(&x[0], &y[0]);  res &= y == Vec({3,7,11,15});
+
+  res &= A(0, 0) == 1.f;
+  res &= A(0, 1) == 1.f;
+  res &= A(0, 2) == 0.f;
+  res &= A(0, 3) == 0.f;
+  // ...
+
+  // todo: test replacing elements, also with zero (in which case they should get removed)
+
+  return res;
+}
+
+bool testSparseMatrixSolvers()
+{
+  bool res = true;
+
+  using Vec = std::vector<float>;
+  using Mat = rsSparseMatrix<float>;
+
+  //      |7 1 2|
+  //  A = |3 8 4|  ...must be strictly diagoally dominant for Gauss-Seidel to converge
+  //      |5 2 9|
+
+  int N = 3;
+  Mat A(N, N);
+  A.set(0, 0, 7.f);  A.set(0, 1, 1.f);  A.set(0, 2, 2.f);
+  A.set(1, 0, 3.f);  A.set(1, 1, 8.f);  A.set(1, 2, 4.f);
+  A.set(2, 0, 5.f);  A.set(2, 1, 2.f);  A.set(2, 2, 9.f);
+
+  // Compute matrix-vector product y = A*x:
+  Vec x({1,2,3}), y(N);
+  A.product(&x[0], &y[0]);
+  res &= y == Vec({15, 31, 36});
+  A.iterateProduct(&x[0], &y[0]);
+  res &= y == Vec({15, 31, 36});
+
+  // Try to reconstruct x via solving A*x = y:
+  //Mat D = A.getDiagonalPart();    // maybe this should be a vector...but maybe not
+  //Mat C = A.getNonDiagonalPart();
+
+  //float tol = 1.e-6f;
+  float tol = 0.f;
+  Vec x2(N);
+  //int numIts = Mat::solveGaussSeidel(D, C, &x2[0], &y[0], tol);
+  int numIts = Mat::solveGaussSeidel(A, &x2[0], &y[0], tol);
+  res &= x == x2;
+  res &= numIts == 13;  // converges to machine precision (with 0 tolerance) in 13 iterations
+
+
+  rsSetZero(x2);
+  Vec wrk(N);
+  numIts = Mat::solveSOR(A, &x2[0], &y[0], tol, &wrk[0], 1.f); // 1: same as Gauss-Seidel
+  res &= x == x2;
+  res &= numIts == 13; 
+  rsSetZero(x2);
+  numIts = Mat::solveSOR(A, &x2[0], &y[0], tol, &wrk[0], 0.f); // 0: same as Jacobi
+  res &= x == x2;
+  res &= numIts == 40;   // Jacobi takes much longer!
+
+  // try some other values of w:
+  rsSetZero(x2);
+  numIts = Mat::solveSOR(A, &x2[0], &y[0], tol, &wrk[0], 0.5f); 
+  res &= x == x2;
+  res &= numIts == 18;   // 0.5 is in between Jacobi and Gauss-Seidel as expected
+
+  // w > 1 gets us into actual *over*relaxation territory - but it doesn't seem to improve 
+  // convergence:
+  rsSetZero(x2);
+  numIts = Mat::solveSOR(A, &x2[0], &y[0], tol, &wrk[0], 1.1f); 
+  res &= x == x2;
+
+  // ..so Gauss-Seidel actually seems to converge fastest, which is good because it's also the most
+  // efficient algo and uses no additional workspace memory! ..but why does SOR not outperform it? 
+  // isn't it supposed to do? maybe there's a bug? ...more tests and experiments needed...
+
+  // ToDo: in certain contexts, it may make sense to use a better initial guess (here, we use the 
+  // zero vector)
+
+
+
+  // Try to find eigenvalues and vectors:
+  float ev;
+  x = Vec({1,1,1});
+  //A.largestEigenValueAndVector(&ev, &x[0], tol, &wrk[0]);
+  // that doesn't work yet
+
+
+  // Try to find the eigenvalues and -vectors of A = V^T * D * V with
+  // 
+  //     |1  1  1|                 |5  0  0|          |4  0  10|
+  // V = |1  1 -1| / sqrt(3),  D = |0 -3  0|,  -> A = |0  4   2| / 3
+  //     |1 -1  1|                 |0  0  2|          |10 2   4|
+  //
+  // Sage code for the matrices:
+  // V = Matrix([[1, 1, 1],[1,1,-1],[1,-1,1]]) / sqrt(3)
+  // D = Matrix([[5, 0, 0],[0,-3,0],[0,0,2]])
+  // A = V.transpose() * D * V
+  // V, D, A
+
+  /*
+  A.set(0, 0,  4.f/3);  A.set(0, 1, 0.f/3);  A.set(0, 2, 10.f/3);
+  A.set(1, 0,  0.f/3);  A.set(1, 1, 4.f/3);  A.set(1, 2,  2.f/3);
+  A.set(2, 0, 10.f/3);  A.set(2, 1, 2.f/3);  A.set(2, 2,  4.f/3);
+  x = Vec({1,2,3});
+  tol = 1.e-7;
+  numIts = A.largestEigenValueAndVector(&ev, &x[0], tol, &wrk[0]);
+  */
+
+  // hmm... A.eigenvectors_right()  does not give the eigenvalues and -vectors i expected from
+  // the construction isn't V supposed to be the matrix of eigenvectors and D the diagonal matrix
+  // with the eignevalues? ...maybe try another example from a book or wikipedia:
+  // https://en.wikipedia.org/wiki/Eigenvalues_and_eigenvectors#Three-dimensional_matrix_example
+  // i think, the matrix v is not orthogonal, so we may need to do A = V * D * inv(V) or something?
+  // https://en.wikipedia.org/wiki/Diagonalizable_matrix
+  // V = Matrix([[1,1,1],[1,1,-1],[1,-1,1]])
+  // V.inverse()
+
+
+  A.set(0, 0, 2.f);  A.set(0, 1, 0.f);  A.set(0, 2, 0.f);
+  A.set(1, 0, 0.f);  A.set(1, 1, 3.f);  A.set(1, 2, 4.f);
+  A.set(2, 0, 0.f);  A.set(2, 1, 4.f);  A.set(2, 2, 9.f);
+  x = Vec({1,2,3});
+  tol = 1.e-7f;
+  //numIts = A.largestEigenValueAndVector(&ev, &x[0], tol, &wrk[0]);
+
+
+  using LA = rsIterativeLinearAlgebra;
+  x = Vec({1,2,3});
+  numIts = LA::largestEigenValueAndVector(A, &ev, &x[0], tol, &wrk[0]);
+  // val: 11, vec: (0,1,2) / sqrt(5)
+
+  Vec vals(3);
+  Vec vecs({1,2,3, 1,2,3, 1,2,3});
+  numIts = LA::eigenspace(A, &vals[0], &vecs[0], tol, &wrk[0]);
+
+  // todo: 
+  // -figure out what happens when we have eigenvalues with multiplicities (algebraic and/or
+  //  geometric)
+
+
+  return res;
+}
+
+bool testMatrixConvolution()
+{
+  bool ok = true;
+  using Mat = rsMatrix<double>;
+  Mat A(4, 5, {1,2,3,4,5, 6,7,8,9,10, 11,12,13,14,15, 16,17,18,19,20}); // input 1
+  Mat B(3, 4, {1,2,3,4, 5,6,7,8, 9,10,11,12});                          // input 2
+  Mat T(6, 8, {  1,   4,   10,  20,   30,  34,  31,  20,                // target result
+                11,  35,   74, 130,  166, 161, 133,  80,
+                50, 133,  252, 410,  488, 441, 346, 200,
+               125, 298,  522, 800,  878, 756, 571, 320,
+               179, 399,  662, 970, 1038, 857, 625, 340,
+               144, 313,  508, 730,  772, 625, 448, 240}); 
+  Mat C = A.getConvolutionWith(B);
+  ok &= C == T;
+  return ok;
+}
+// for producing reference output, see:
+// http://juanreyero.com/article/python/python-convolution.html
+
 bool testMatrix()
 {
   std::string dummy;
@@ -738,14 +934,23 @@ bool testMatrix()
   // obsolete - tests the old matrix class - todo: write similar tests for the new class
   //...
 
-  // tests for the nwe matrix class:
+  // tests for the new dense matrix class:
   testResult &= testMatrixView();
   testResult &= testMatrixOperators();
   testResult &= testMatrixAlloc();
   testResult &= testKroneckerProduct();
-
-
   //testResult &= testTransformMatrices();
+
+  testResult &= testMatrixConvolution();
+
+  // todo:
+  // test: inverse, pseudo-inverse: (A^T * A)^-1 * A^T
+
+
+  testResult &= testSparseMatrix(); 
+  testResult &= testSparseMatrixSolvers();
+
+
 
   return testResult;
 }

@@ -401,6 +401,7 @@ void AcidPatternEditor::paint(juce::Graphics &g)
   g.drawLine(x, y, w, y, thickness);  y += h;
   g.drawLine(x, y, w, y, thickness);  y += h;
   g.drawLine(x, y, w, y, thickness);
+  // maybe use loop
 
   // draw the lines between the piano-roll white keys:
   g.setColour(lineColour);
@@ -544,6 +545,56 @@ AcidSequencerModuleEditor::AcidSequencerModuleEditor(CriticalSection *newPlugInL
   shiftRightButton->setClickingTogglesState(false);
   shiftRightButton->addRButtonListener(this);
 
+  addWidget( shiftAccentsLeftButton = new RButton("L") );
+  shiftAccentsLeftButton->setDescription("Shift the accents one postion to the left (circularly)");
+  shiftAccentsLeftButton->setDescriptionField(infoField);
+  shiftAccentsLeftButton->setClickingTogglesState(false);
+  shiftAccentsLeftButton->addRButtonListener(this);
+
+  addWidget( shiftAccentsRightButton = new RButton("R") );
+  shiftAccentsRightButton->setDescription("Shift the accents one postion to the right (circularly)");
+  shiftAccentsRightButton->setDescriptionField(infoField);
+  shiftAccentsRightButton->setClickingTogglesState(false);
+  shiftAccentsRightButton->addRButtonListener(this);
+
+  // reduces boilerplate - todo: update code above to use this code, too:
+  auto addButton = [&](RButton** pButton, const String& name, const String& description)
+  {
+    addWidget( *pButton = new RButton(name) );
+    (*pButton)->setDescription(description);
+    (*pButton)->setDescriptionField(infoField);
+    (*pButton)->setClickingTogglesState(false);
+    (*pButton)->addRButtonListener(this);
+  };
+
+  addButton(&shiftSlidesLeftButton,   "L", "Shift the slides one postion to the left (circularly)");
+  addButton(&shiftSlidesRightButton,  "R", "Shift the slides one postion to the right (circularly)");
+  addButton(&shiftNotesLeftButton,    "L", "Shift the notes one postion to the left (circularly)");
+  addButton(&shiftNotesRightButton,   "R", "Shift the notes one postion to the right (circularly)");
+  addButton(&shiftOctavesLeftButton,  "L", "Shift the octaves one postion to the left (circularly)");
+  addButton(&shiftOctavesRightButton, "R", "Shift the octaves one postion to the right (circularly)");
+  // reduce boilerplate further by making two functions addShiftLeft/RightButton that takes as 
+  // string only "accents", "slides", etc.
+  // todo: maybe instead of L and R use the left/right arrow symbols
+
+  addButton(&reverseAllButton,    "Rev", "Reverses the whole pattern");
+  addButton(&reverseAccentsButton,"Rev", "Reverses the accents");
+  addButton(&reverseSlidesButton, "Rev", "Reverses the slides");
+  addButton(&reverseNotesButton,  "Rev", "Reverses the notes");
+  addButton(&reverseOctavesButton,"Rev", "Reverses the octaves");
+
+  addButton(&invertAccentsButton, "Inv", "Inverts the accents");
+  addButton(&invertSlidesButton,  "Inv", "Inverts the slides");
+  addButton(&invertOctavesButton, "Inv", "Inverts the octaves");
+
+
+  addButton(&swapAccentsSlidesButton, "A2S", "Swaps accents with slides");
+  addButton(&xorAccentsSlidesButton,  "AXS", "Xors accents with slides");
+  addButton(&xorSlidesAccentsButton,  "SXA", "Xors slides with accents");
+
+  // maybe let new accents be old accenzts xor'ed with slides, smae for slides
+
+
   // set up the widgets:
   updateWidgetsAccordingToState();
 }
@@ -556,18 +607,52 @@ AcidSequencerModuleEditor::AcidSequencerModuleEditor(CriticalSection *newPlugInL
 //-------------------------------------------------------------------------------------------------
 // callbacks:
 
-void AcidSequencerModuleEditor::rButtonClicked(RButton *buttonThatWasClicked)
+void AcidSequencerModuleEditor::rButtonClicked(RButton *b)
 {
   if( acidSequencerModuleToEdit==NULL || acidSequencerModuleToEdit->wrappedAcidSequencer==NULL )
     return;
 
-  if( buttonThatWasClicked == shiftLeftButton )
-    acidSequencerModuleToEdit->wrappedAcidSequencer->circularShift(-1);
-  else if( buttonThatWasClicked == shiftRightButton )
-    acidSequencerModuleToEdit->wrappedAcidSequencer->circularShift(+1);
+  auto seq = acidSequencerModuleToEdit->wrappedAcidSequencer;
 
-  // \todo: randomization stuff....
+  if(      b == shiftLeftButton         ) seq->circularShiftAll(-1);
+  else if( b == shiftRightButton        ) seq->circularShiftAll(+1);
+  else if( b == shiftAccentsLeftButton  ) seq->circularShiftAccents(-1);
+  else if( b == shiftAccentsRightButton ) seq->circularShiftAccents(+1);
+  else if( b == shiftSlidesLeftButton   ) seq->circularShiftSlides(-1);
+  else if( b == shiftSlidesRightButton  ) seq->circularShiftSlides(+1);
+  else if( b == shiftOctavesLeftButton  ) seq->circularShiftOctaves(-1);
+  else if( b == shiftOctavesRightButton ) seq->circularShiftOctaves(+1);
+  else if( b == shiftNotesLeftButton    ) seq->circularShiftNotes(-1);
+  else if( b == shiftNotesRightButton   ) seq->circularShiftNotes(+1);
 
+  else if( b == reverseAllButton     ) seq->reverseAll();
+  else if( b == reverseAccentsButton ) seq->reverseAccents();
+  else if( b == reverseSlidesButton  ) seq->reverseSlides();
+  else if( b == reverseNotesButton   ) seq->reverseNotes();
+  else if( b == reverseOctavesButton ) seq->reverseOctaves();
+
+  else if( b == invertAccentsButton ) seq->invertAccents();
+  else if( b == invertSlidesButton  ) seq->invertSlides();
+  else if( b == invertOctavesButton ) seq->invertOctaves();
+
+  else if( b == swapAccentsSlidesButton ) seq->swapAccentsWithSlides();
+  else if( b == xorAccentsSlidesButton  ) seq->xorAccentsWithSlides();
+  else if( b == xorSlidesAccentsButton  ) seq->xorSlidesWithAccents();
+
+
+
+  // todo: reverse, swap-halves (swap 1st and 2nd half), exchange, for example, slide for accent,
+  // ...all these features are easier with parallel arrays, maybe then, the length of the 
+  // individual arrays can be different
+
+  // \todo: randomization stuff....we should give the user the option to define a set of notes,
+  // like C, E#, G, G#, Bb with certain probabilities and then a random number generator generates
+  // a sequence.  it should also randomly set accents and slides...perhaps the probabilities
+  // for on-beat and off-beat accents etc. can be set up
+
+
+
+  // BUG: shifting the octaves sometimes produces garbage on the gui
 
   patternEditor->repaint();
 }
@@ -600,18 +685,58 @@ void AcidSequencerModuleEditor::resized()
   y = getPresetSectionBottom()+4;
   x = 4;
   patternEditor->setBounds(x, y, 368, 220);
+  x = patternEditor->getRight();
+  y = patternEditor->getY();
+  setRightKeepLeft(stateWidgetSet, x);
+  int h = patternEditor->getTopLaneHeight();
+  w = 28; 
+  shiftLeftButton->setBounds( x,       y, w, h);
+  shiftRightButton->setBounds(x+  w-2, y, w, h);
+  reverseAllButton->setBounds(x+2*w-4, y, w, h);
+  y += h;
+  shiftAccentsLeftButton->setBounds( x,       y, w, h);
+  shiftAccentsRightButton->setBounds(x+  w-2, y, w, h);
+  reverseAccentsButton->setBounds(   x+2*w-4, y, w, h);
+  invertAccentsButton->setBounds(    x+3*w-6, y, w, h); // test - if looks good, use for others, too
+  y += h;
+  shiftSlidesLeftButton->setBounds( x,       y, w, h);
+  shiftSlidesRightButton->setBounds(x+  w-2, y, w, h);
+  reverseSlidesButton->setBounds(   x+2*w-4, y, w, h);
+  invertSlidesButton->setBounds(    x+3*w-6, y, w, h);
+  y += h;
+  shiftOctavesLeftButton->setBounds( x,       y, w, h);
+  shiftOctavesRightButton->setBounds(x+  w-2, y, w, h);
+  reverseOctavesButton->setBounds(   x+2*w-4, y, w, h);
+  invertOctavesButton->setBounds(    x+3*w-6, y, w, h);
+  y += h;
+  shiftNotesLeftButton->setBounds( x,       y, w, h);
+  shiftNotesRightButton->setBounds(x+  w-2, y, w, h);
+  reverseNotesButton->setBounds(   x+2*w-4, y, w, h);
 
   x = patternEditor->getRight();
-  w = getWidth()-x;
+  y = stateWidgetSet->getY();
+  modeLabel->setBounds(x, y, 40, 16);
+  x = modeLabel->getRight();
+  w = getWidth() - x;
+  modeBox->setBounds(x, y, w-4, 16);
 
-  modeLabel->setBounds(x+4,    y+4, 40,     16);
-  modeBox->setBounds(  x+40+4, y+4, w-40-8, 16);
-  y = modeBox->getBottom();
+  y = shiftNotesRightButton->getBottom() + 8;
+  x = patternEditor->getRight();
+  w = 32;
+  swapAccentsSlidesButton->setBounds(x+16,       y, w, 16);
+  xorAccentsSlidesButton->setBounds( x+16+  w-2, y, w, 16);
+  xorSlidesAccentsButton->setBounds( x+16+2*w-4, y, w, 16);
+
+  y += 24;
+  w  = getWidth() - x;
   stepLengthSlider->setBounds(x+4, y+4, w-8, 16);
-
-  y = stepLengthSlider->getBottom()+4;
-  shiftLabel->setBounds(x+4, y+4, 40, 16);
-  x = shiftLabel->getRight();
-  shiftLeftButton->setBounds(                           x+4, y+4, 24, 16);
-  shiftRightButton->setBounds(shiftLeftButton->getRight()+4, y+4, 24, 16);
 }
+
+
+/*
+-make step-length available for modulation
+-add selector for pattern (maybe a 4x4 array)
+-implement copy/paste for patterns
+-fix colors
+
+*/

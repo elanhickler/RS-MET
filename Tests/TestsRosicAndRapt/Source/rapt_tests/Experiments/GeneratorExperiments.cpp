@@ -220,9 +220,6 @@ void noise()
   // testNoiseGen(int numSamples, int order, bool plotHistogram, bool writeWaveFile)
 }
 
-
-
-
 void noiseTriModal()
 {
   int numSamples = 100000;
@@ -253,7 +250,158 @@ void noiseTriModal()
   // to rarely
 }
 
+void noiseWaveShaped()
+{
+  // We create uniform white noise, apply a first order filter, predict the resulting amplitude
+  // distribution and use the corresponding cumulative distribution to shape the amplitude 
+  // distribution back to uniform. The eventual goal is to figure out a way how to shape the 
+  // spectrum and amplitude distribution of some noise independently by using a combination of 
+  // filtering and waveshaping....
 
+  int numSamples = 50000;
+  int numBins    = 61;
+  double b0      = 1.0;    // filter coeff for direct signal
+  double b1      = 1.0;    // filter coeff for delayed input signal
+  double a1      = 0.8;    // filter coeff for delayed output signal
+  int numConvs   = 8;      // determines accuracy of our approximation of the pdf
+
+
+  // Create the raw input noise:
+  rsNoiseGenerator<double> ng;
+  using Vec = std::vector<double>;
+  int N = numSamples;
+  Vec x(N);
+  for(int n = 0; n < N; n++)
+    x[n] = ng.getSample();
+  //plotHistogram(x, numBins, -1.0, +1.0);  // uniform in -1..+1
+
+  // alternatively, create a sinewave:
+  //createSineWave(&x[0], numSamples, 440, 1.0, 44100);
+  //createWaveform(&x[0], numSamples, 1, 440., 44100., 0.0, true);
+
+
+  // Apply a 2-point MA filter y[n] = b0*x[n] + b1*x[n-1]:
+  double xOld = 0;
+  double yOld = 0;
+  for(int n = 0; n < N; n++)
+  {
+    double y = b0*x[n] + b1*xOld + a1*yOld;
+    xOld = x[n];
+    yOld = y;
+    x[n] = y;
+  }
+  plotHistogram(x, numBins, -2.0, +2.0); // triangular in -2..+2, if b0 = b1 = 1, a1 = 0
+
+
+  // Here, we predict the amplitude distribution based on the filter coeffs. When a1 == 0, i.e. the
+  // filter is nonrecursive, we actually get an exact pdf and cdf. When the filter is recursive, we
+  // obtain an approximation based on a truncated impulse response. The numConvs parameter 
+  // determines, how many samples of the impulse response are taken into account. The impulse 
+  // reponse of the filter is: h[0] = b0, h[1] = b1 + a1*b0, h[n] = a1*h[n-1] for n >= 2:
+  double h0 = b0, hn = b1 + a1*h0;
+  using PiecePoly = rsPiecewisePolynomial<double>; 
+  PiecePoly p0  = PiecePoly::irwinHall(0, -rsAbs(h0), +rsAbs(h0));
+  PiecePoly p1  = PiecePoly::irwinHall(0, -rsAbs(hn), +rsAbs(hn));
+  PiecePoly pdf = p0.convolve(p1);
+  if(a1 != 0) {
+    for(int n = 1; n < numConvs; n++) {
+      hn *= a1;
+      PiecePoly pn = PiecePoly::irwinHall(0, -rsAbs(hn), +rsAbs(hn));
+      pdf = pdf.convolve(pn); }}
+  PiecePoly cdf = pdf.integral();
+  plot(pdf);  // should match the histogram
+  plot(cdf);  // should go from 0 to 1
+
+
+  // Now that we know the cdf of the noise, we can apply this:
+  // https://en.wikipedia.org/wiki/Inverse_transform_sampling
+  // in order to shape the amplitude distribution into a uniform distribution between 0..1:
+  auto f = [&](double x) -> double { return cdf.evaluate(x); };
+  for(int n = 0; n < N; n++)
+    x[n] = f(x[n]);
+  plotHistogram(x, numBins, -0.5, 1.5);
+  // yup - works - looks uniform in 0..1 
+  // -now we should have noise that is not white but has a uniform amplitude distribution
+  // -we can now further shape the amplitude distribution to taste
+
+  // Map it to the range -1..+1
+  for(int n = 0; n < N; n++)
+    x[n] = 2*x[n] - 1;
+  plotHistogram(x, numBins, -1.5, 1.5);
+  rosic::writeToMonoWaveFile("NoiseWaveShaped.wav", &x[0], N, 44100); 
+
+  // Observations:
+  // -if b0 = b1 = 1, the filtered output has a triangluar pdf from -1..+1 
+  // -if b0 = 1, b1 = 0.5 (or vice versa), we get a trapezoidal distribution from -1.5..+1.5
+  // -i think the general rule is that we need to convolved two stretched/compressed uniform 
+  //  distribtutions where the strech factors are the filter coeffs
+  // -i guess, this generalizes to higher order filters - we just have to perform repeated 
+  //  convolutions
+  // -for IIR filters, we may have to obtain the impluse-response first to express it as an MA 
+  //  filter and then do repeated convolutions using the so obtained non-recursive coeffs
+  // -when numConvs is too low, we get an emphasis of extreme amplitude values - the distribution
+  //  gets batman ears
+  // -for a closer to 1, we need more numConvs to get a reasonable approximation of the cdf
+
+  // ToDo:
+  // -measure autocorrelation of result
+  // -try waveshping first and then filtering
+  // -try multiple stages of filter -> shape or shape -> filter
+  // -try the process on other signals, like sinewaves, sawtooth waves, etc.
+  // -alternatively, measure the amplitude distribution from an arbitrary signal
+  // -try to improve the approximation of the amplitude distribution after the IIR filter by 
+  //  convolving slightly wider 0th order irwin-hall distribtuions. the idea is to compensate for 
+  //  the truncation after finitely many convolutions by using wider input distributions. assess 
+  //  the quality of a low-order approximation by comparing with a high-order approximation, i.e. 
+  //  one using a higher number of convolutions
+
+  // See:
+  // https://en.wikipedia.org/wiki/Probability_integral_transform
+  // this is eactly what we need
+
+  // also of interest is the inverse:
+  // https://en.wikipedia.org/wiki/Inverse_transform_sampling
+
+  // I think, in order to get a uniform distribution out of a filtered uniform noise, it may work
+  // like this:
+  // -filter the uniform noise and figure out the resulting amplitude distribution f_x, for 
+  //  example, a 2-point MA filter turns a uniform distribution from -1..+1 into a triangular 
+  //  distribution from -2..+2
+  // -from f_x figure out the cumulative distribution F_x and apply it as waveshaper to the 
+  //  filter's output - the new variable should be uniformly distributed between 0..1
+  // -scale and shift back to the desired range -1..+1
+  // I also think, we could first waveshape, then filter, if we use the inverse CDF instead. These
+  // two operations: filtering and waveshaping, used together in an appropriate way should give 
+  // rise to a framework to shape the spectral and amplitude distribution properties of noise to
+  // taste. It may be interesting to explore how they could be chained to produce more interesting
+  // noises.
+
+  // Question: can we derive a formula or algorithm that tells us the resulting amplitude 
+  // distribution for a given filter (given that input to the filter is uniformly distributed?). 
+  // Ideally, if possible, from the filter coeffs but maybe we need to consider the freq-response. 
+  // For MA filters of length k, we get the Irvin-Hall distribution of the same order (maybe 
+  // divided by k) - but what about recursive filters? Maybe we can start from MA filters with 
+  // weights and express the impulse response of a recursive filter as such. Let's consider the
+  // filter y[n] = b0*x[n] + b1*x[n-1] ...i think, the resulting amplitude distribution is the 
+  // uniform distribution scaled (in x-direction, i.e. stretched or compressed) by b0 convolved 
+  // with the uniform distribution stretched by b1...is that right? Consider the filter:
+  //   y[n] = b0*x[n] + b1*x[n-1]
+  // and let's assume that x has a probability density function (pdf) p_x(x). What is the pdf of
+  // the output p_y(y)? If we assume that the x[n] are independently drawn from p_x(x), i.e. 
+  // uncorrelated, i think, it's p_y(y) = conv(p_x(x/b0)/b0, p_x(x/b1)/b1), i.e. the convolution of
+  // appropriately stretched/compressed and scaled versions of p_x(x). When any of b-coeffs 
+  // approach zero, the corresponding factor in the convolution product approaches the Dirac 
+  // delta distribution (small b make the distribution narrower and scale it up). When using more
+  // past x samples, i.e. a higher order non-recursive filter, we would have to do repeated 
+  // convolutions...right? or wrong? after the first convolution, one of the inputs to the 2nd 
+  // convolution is correlated, so the independence assumption does not hold anymore for one of the
+  // factors (is it enough, if it holds for only one?)..hmm...let's assume, it works - then, a 
+  // recursive filter could be expressed via its impulse response and then the formula for the 
+  // non-recursive filter could be used (leading to an infinitely often iterated convolution)
+
+  // To actually compute such a pdf, we need a way of convolving functions that are expressed as
+  // piecewise polynomials. 
+}
 
 // maybe let it take a parameter for the length and produce various test signals with various 
 // lengths to see, how the quality depends on the length:
@@ -2170,25 +2318,130 @@ void snowFlake()
   int N    = 44100;  // number of samples
   int fs   = 44100;  // sample rate
   double f = 1000;   // signal frequency
+  double resetRatio = 0.251;  // use 0 to turn resetting off
+
+  //resetRatio  = 0.0;
+  f *= sqrt(2.0);  // test
+  //f = 1102.5;
+
+  //fs = 32; f = 1.1;
+  //fs = 32; f = 1.01;
+  //fs = 32; f = 1.001;  // fails - adds upward spikes
+  //fs = 32; f = 1.0001;  // fails - adds upward spikes
+  //fs = 32; f = 1;     // works with edge-case check
+  //fs = 32; f = 0.999;     // fails - adds downward spikes
+  //fs = 32; f = 0.99;
+  //fs = 32; f = 0.9;
+
+  using Vec = std::vector<double>;
 
   rosic::Snowflake sf;
   sf.setSampleRate(fs);
   sf.setFrequency(f);
   sf.setAmplitude(0.5);
-  sf.setAxiom("F+F+F+F+");
-  sf.setTurnAngle(90);    // try something else (60?) to see effect of resets)
+  //sf.setPhaseOffset(0.0625 * 360);
+  //sf.setPhaseOffset(0.125 * 360);
+  //sf.setPhaseOffset(0.6 * 360);
+  sf.setAxiom("F+F+F+F+"); sf.setTurnAngle(90);    // square
+  //sf.setAxiom("F+F+F+F+F+"); sf.setTurnAngle(72);    // pentagon
+  //sf.setAxiom("F+F+F+F+F+F+"); sf.setTurnAngle(60);    // hexagon
   sf.setUseTable(false);
   sf.setAntiAlias(false);
   sf.setNumIterations(0);
+  sf.setResetRatio(0, resetRatio);
 
-  // produce signal and write to file:
-  std::vector<double> xL(N), xR(N);
+  // produce signal without anti-aliasing:
+  Vec xL1(N), xR1(N);
   for(int n = 0; n < N; n++)
-    sf.getSampleFrameStereo(&xL[n], &xR[n]);
-  rosic::writeToStereoWaveFile("SnowflakeTest.wav", &xL[0], &xR[0], N, fs);
+    sf.getSampleFrameStereo(&xL1[n], &xR1[n]);
+
+  // produce signal with anti-aliasing:
+  Vec xL2(N), xR2(N);
+  sf.setAntiAlias(true);
+  sf.reset();
+  for(int n = 0; n < N; n++)
+    sf.getSampleFrameStereo(&xL2[n], &xR2[n]);
+
+  // plot:
+  int numPlotPoints = 1000;
+  Vec dL1 = rsDifference(xL1);  // difference
+  Vec dL2 = rsDifference(xL2);
+  Vec cL1 = rsDifference(dL1);  // 2nd difference (curvature)
+  Vec cL2 = rsDifference(dL2);
+  //rsPlotArrays(numPlotPoints, &xL1[0], &xL2[0]);     // left without and with anti-alias
+  //rsPlotArrays(numPlotPoints, &dL1[0], &dL2[0]);   // left difference without and with anti-alias
+  //rsPlotArrays(numPlotPoints, &cL1[0], &cL2[0]);
+  //rsPlotArrays(numPlotPoints, &xR1[0], &xR2[0]);
+  //rsPlotArrays(numPlotPoints, &xL1[0], &xR1[0]);   // left/right non anti-aliased
+  rsPlotArrays(numPlotPoints, &xL2[0], &xR2[0]);   // left/right anti-aliased
+
+
+  // write files:
+  rosic::writeToStereoWaveFile("SnowflakeTest.wav",   &xL1[0], &xR1[0], N, fs);
+  rosic::writeToStereoWaveFile("SnowflakeTestAA.wav", &xL2[0], &xR2[0], N, fs);
+
+
+  // Observations:
+  // -Tests passed with 1 resetter with resetRatios of: 0.49, 0.51, 1.5, 1.9, 2.1
+  // -Tests failed with 1 resetter with resetRatios of: 0.25, 0.50, 1.0, 2.0
+  //  -it seems only the right channel is wrong (that's strange!)
+  //  -it has probably to do with the reset occuring at a moment exactly when a cycle finishes
+  //  -with 0.25, we see 3 correct cycles alternate with 1 messed up cycle
+  //  -we actually do not fall into the "if(iPos != lineIndex)" branch in cases where a reset 
+  //   occured before for this sample
+  //  -apparently, stepX is always 0 and stepY is always 1 when the reset occurs - but that is 
+  //   wrong! both steps should be 0, right?
+  //  -using "F+F+F+F" as seed withut the final + does not seem to help
+  //   with f = 1102.5 there 8 initial correct cycles before it goes wrong
+  //  -when using an inc = 1/32 (via fs=32, f=1), the glitches occur at k*128 samples
+  // -a resetRatio of 0.252 has occasional spikes - it seems like the closer the ratio is to a 
+  //  fraction of the cycle-length, the denser the spurious spikes get, so maybe we should assume
+  //  they are always there, regardless of the ratio, just more or less frequently
+  // -probably they always happen when two events (reset and line-switch?) occur within one sample?
+  //  ...but the line-switch does not happen anymore, after a reset occured...maybe it should? but 
+  //  no, that doesn't seem to make sense - a reset actually switches to a new line segment, too
+  //  but maybe a line-switch may happen a sample *before* the reset and then we have two 
+  //  correction bleps...or at least 2 blamps
+  // -oh: it does happen to x, too when we use, for example setPhaseOffset(0.125 * 360)
+  // -try to figure out what conditions are different when the spikes occur (fPos, targetPhase, 
+  //  etc.)
+
+  // -i think, TurtleSource::resetPhase must take into account the starPhase set by 
+  //  setPhaseOffset(0.6 * 360); otherwise we trigger an assert right in first getSample call 
+  //  because we get an invalid blepTi - we should make sure that the (iPos != lineIndex) branch is
+  //  not entered in the first call...but that could give rise to more porblems when we jump over
+  //  several line segments in one sample - in thins case, the blepTime = fPos / (numLines*inc) may 
+  //  not work
+
+  // -the inc depends on the resetRatio - why? probably to tune the funcdamental frequency 
+  //  independently from the reset ratio
+  // -the first resetter is by default not off but instead set to a reset-ratio of 1, turning 
+  //  resetting off actually produces a clean signal even without anti-aliasing
+
+  // Notes:
+  // -let N be the number of line-segments, then: pos = [0..1), linePos = [0..N), 
+  //  iPos = floor(linePos) = [0..N-1] (is N-1 really included - why?), 
+  //  fPos = linePos - iPos = [0..1), fPos is used to interpolate between start and end of current 
+  //  line segment  
+  // -to be free from alisiasng when using blamps for the line segment switches, we need 
+  //  inc <= 1/N (i think)
+  // -if a blamp occurs due to going from line i to i+1 during nomral(!) playback, the formula
+  //  blepTime = fPos/(N*inc) works (why?), but in the very first sample or when we skip segments 
+  //  due to high inc (violating inc <= 1/N), this formula seems inappropriate...we may get 
+  //  blepTime > 1 ...maybe we should fmod the value by 1? does that make sense? or do we need an 
+  //  entirely different approach?
+  // -actually, the line-segment change could also create a step-discontinuity, but in normal 
+  //  operation (where pos increases by inc (<= 1/N) each sample), this only is the case when we
+  //  wrap around, i.e. i = N-1, i+1 = wrapAround(N) = 0 and the turtle's path is not closed
+  // -maybe it would be more convenient to have a turtle-source that allows for random access 
+  //  values: double Turtle::getSampleAt(double phase) ...it could internally compute the increment
+  //  by inc = phase - oldPhase, if phase and oldPhase are both in [0..1), inc is in (-1..+1) for 
+  //  each sample, oldPhase would be member variable
+  //  -this may facilitate phase-modulation more easily than the current implementation
+  //  -we could build a driver around it that creates a swatooth shape for the phase
+
+
 }
-// when there is a turn in the turtle-source, the slope/derivative of both x and y (as functions of 
-// time t) have a suddenchange which means, a blamp must be inserted into both
 
 void triSawOsc()
 {
@@ -2394,4 +2647,64 @@ void xoxosOsc()
   // -transform point (which is on sphere) to point on ellipsoid (which contains origin)
   // -project onto unit sphere by dividing x,y,z by  sqrt(x^2 + y^2 + z^2)
   // -take linear combination of x,y,z as output
+}
+
+void shepardTone()
+{
+  using Real = double;
+
+  Real sampleRate = 44100.f;
+  Real length     = 3.0;     // length of 1 cycle in seconds
+  int  numCycles  = 4;       // number of cycles to generate
+
+
+  Real speed = 12.0 / length;
+
+  rsShepardToneGenerator<Real> stg;
+  stg.setSampleRate(sampleRate);
+  stg.setBellFloor(0.00001);
+  stg.setSpeed(speed);
+  stg.updateCoeffs();
+
+  using AT  = RAPT::rsArrayTools;
+  using Vec = std::vector<Real>;
+
+  int N = (int) round(length * sampleRate * numCycles);
+  Vec y(N);
+  for(int n = 0; n < N; n++)
+    y[n] = stg.getSample();
+
+  AT::normalize(&y[0], N, Real(0.5));
+  rosic::writeToMonoWaveFile("ShepardTone.wav", &y[0], N, (int)sampleRate);
+
+
+  /*
+  // Generate and plot the frequency response of the pseudo "filter"
+  int numBins = 1000;
+  Vec freqs(numBins), amps(numBins);
+  AT::fillWithRangeExponential(&freqs[0], numBins, 20.0, 20000.0);
+  for(int i = 0; i < numBins; i++)
+    amps[i] = stg.getGainForFrequency(freqs[i]);
+  GNUPlotter plt;
+  plt.addDataArrays(numBins, &freqs[0], &amps[0]);
+  plt.setLogScale("x");
+  plt.plot();
+  */
+
+
+
+  // ToDo: 
+  // -there are still discontinuities at the wrap-arounds of the time variable. i think, they 
+  //  happen because the sine that is switched off is not yet totally zero and the one that is 
+  //  switched on does not start at zero?
+  //  -figure out by generating only bottom and top sine and/or 
+  //  -using a lower floor does not seem to help
+  //  -commenting out the if(p < centerPitch - halfWidth) ... stuff also does not help
+  //  -maybe inconsistent use of > and >= in the various wraparounds? nope: using >= consistently
+  //   also doesn't fix is - but is probably a good idea anyway
+  //  -it seems like the phase jumps suddenly - maybe it's not a good idea to multiply the phase
+  //   itself by the factor?
+  // -what about using using an actual filter instead of the pseduo-filter?
+
+  int dummy = 0;
 }

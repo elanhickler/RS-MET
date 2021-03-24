@@ -9,7 +9,13 @@ template<class T>
 void rsAttackDecayFilter<T>::updateCoeffs()
 {
   T tauAttack;
-  expDiffScalerAndTau2(decaySamples, attackSamples+T(1), &tauAttack, &s);
+
+  T attackSamples2 = rsMin(T(0.99) * decaySamples, attackSamples + T(1));
+  // Why the 2nd +1? to avoid numerical problems when is goes down to zero? Then maybe 
+  // using max would be better...or is there some offset of 1 sample that is being compesated?
+
+
+  expDiffScalerAndTau2(decaySamples, attackSamples2, &tauAttack, &s);
   ca = exp(-1.0/tauAttack);       // = exp(-alpha), pole radius
   cd = exp(-1.0/decaySamples);
   coeffsDirty = false;
@@ -92,5 +98,9 @@ filter just the same weighted sum of exp(-t/tau) and 1-exp(-t/tau). We need to s
 and churn through the same analysis and algebra (take derivative, set zero, etc.) as was originally
 done to derive the formulas in expDiffScalerAndTau2.
 
+ToDo:
+-maybe to implement a release time different from the decay time, just switch the decay time 
+ constant to a different value in release phase or let the constant input not go down to zero 
+ immediately but via another RC filter...but that would work well only if release >= decay
 
 */

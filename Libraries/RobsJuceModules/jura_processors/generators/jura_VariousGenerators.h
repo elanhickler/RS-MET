@@ -3,7 +3,8 @@
 // rename to Oscillators
 //=================================================================================================
 
-/** A thin wrapper around rosic::SineOscillator to facilitate use as an AudioModule. */
+/** A thin wrapper around rosic::SineOscillator to facilitate use as an AudioModule. Maybe get 
+rid of that. */
 
 class JUCE_API SineOscCore : private rosic::SineOscillator
 {
@@ -27,7 +28,8 @@ protected:
   double key = 64;
   double detune = 0.0, amp = 1.0;
 
-  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SineOscCore)
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SineOscCore);
+  //JUCE_LEAK_DETECTOR(SineOscCore);
 };
 
 //=================================================================================================
@@ -65,6 +67,65 @@ protected:
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SineOscAudioModule)
 };
+
+class JUCE_API SineOscAudioModulePoly : public jura::AudioModulePoly
+{
+
+public:
+
+  SineOscAudioModulePoly(CriticalSection *lockToUse,
+    MetaParameterManager* metaManagerToUse = nullptr, 
+    ModulationManager* modManagerToUse = nullptr);
+
+  virtual void noteOn(int key, int vel, int voice) override
+  {
+    jassert(voice >= 0 && voice < voiceManager->getMaxNumVoices());
+    // see comment in AttackDecayEnvelopeModulePoly
+
+    // We want to retrigger the phase of the oscillator but only if the voice was allocated freshly
+    // and not revived from relase
+
+    voices[voice].reset();
+    // hmm...but i think this retriggering should only be done, if the voice was previously silent
+    // ...in cases where a releasing voice is retriggered ()
+
+  }
+
+  void processStereoFrameVoice(double* left, double* right, int voice) override
+  { 
+    *left = *right = voices[voice].getSample(); 
+  }
+
+
+  void setSampleRate(double newSampleRate) override { sampleRate = newSampleRate; }
+
+
+  // parameter callback targets:
+  void setFrequency(double newFrequency, int voice);
+  void setAmplitude(double newAmplitude, int voice);
+  void setDetune(   double newDetune,    int voice);
+  // maybe just have frequency and amplitude parameters and handle the adjustment of frequency via
+  // the mod-system -> provide a polyphonic Moudlator for NotePitch (but hwat range?) and/or 
+  // NoteFrequency that is 
+  // always available in ToolChain - maybe also NoteVelocity (0..1), PitchBend (-1..+1)
+
+
+protected:
+
+  virtual void createParameters();
+  void allocateVoiceResources() override;
+
+  SineOscCore core;  // maybe rename to master
+  //std::vector<RAPT::rsSineOscillator<double>> voices;
+  std::vector<RAPT::rsSineOscillatorNaive<double>> voices;
+
+  double sampleRate;
+
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SineOscAudioModulePoly)
+};
+
+
+//class JUCE_API AttackDecayEnvelopeModulePoly : public AudioModulePoly
 
 //=================================================================================================
 

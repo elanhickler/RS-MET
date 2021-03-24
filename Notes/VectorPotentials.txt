@@ -1,0 +1,250 @@
+Given a 3D vector field defined by the 3 trivariate functions:
+
+  f(x,y,z), g(x,y,z), h(x,y,z)
+
+we want to find another vector field:
+
+  F(x,y,z), G(x,y,z), H(x,y,z)
+
+such that the curl of F,G,H equals f,g,h. The field F,G,H is called the vector 
+potential of f,g,h. The necessarry and sufficient condition for such a vector 
+potential to exist is that the divergence of f,g,h is zero. From the definition
+of curl, we see that F,G,H must satisfy the 3 simultaneous equations:
+
+  f = H_y - G_z, g = F_z - H_x, h = G_x - F_y
+
+where H_y denotes the partial derivative of H with respect to y and so on 
+(subscripts, symbolized by the underscore _, denote partial derivatives).
+Vector potentials are not unique. We have some freedom of choice and we use it
+to set H(x,y,z) = const which simplifies the equation system to:
+
+  f = -G_z, g = F_z, h = G_x - F_y
+
+The f,g equations can now be simply integrated to give:
+
+  G = -f^z + a(x,y), F = g^z + b(x,y)                      (1)
+
+where we use the superscript notation, symbolized by the caret ^, to denote 
+integration ("antidifferentiation") with respect to the superscripted 
+variable, so f^z is f integrated with respect to z. With a(x,y), b(x,y), we
+denote the integration "constants". They are constant only with respect 
+to z but can still be functions of x and y. We can now compute the integrals 
+f^z, g^z and are left with the task to figure out some appropriate integration
+constants a = a(x,y), b = b(x,y) such that the third equation is satisfied:
+
+  h = G_x - F_y 
+    = (-f^z + a)_x - (g^z + b)_y 
+    = (-f^z)_x + a_x - (g^z)_y + b_y
+  
+  h + f^z_x + g^z_y = a_x + b_y                            (2)
+
+This is one equation for the two unknown functions a_x, b_y. We have a 
+again some freedom of choice and use it to set b_y = 0 which determines our
+integration constants as:
+
+  a_x = h + f^z_x + g^z_y
+  b_y = 0
+
+Integrating a_x with respect to x and b_y with respect to y gives our desired
+functions:
+
+  a = a(x,y) = a_x^x = (h + f^z_x + g^z_y)^x
+  b = b(x,y) = b_y^y = 0^y = c(x)
+
+where c(x) can be function of x but for simplicity, we can also set it to zero.
+
+wait: shouldn't a_x be a function of y,z and b_y a function of x,z only? Aren't
+they supposed to be constant with respect to the subscripted variable such that
+they vanish when being differentiated with respect to that variable? ...but 
+further above, a and b are both supposed to be functions of x,y. Does that 
+imply that a_x should depend only on y and b_y only on x? Hmmm - that's 
+confusing. However, the code based on the derivation above seems to work.
+
+-------------------------------------------------------------------------------
+
+Other choices:
+
+We may want the divergence of F,G,H to be zero. In this case, we have the 
+additional equation:
+
+  F_x + G_y + H_z = 0
+
+hmm...if we keep using H = const, we would have H_z = 0, so F_x = - G_y, so:
+
+  h = G_x - F_y = 2*G_x  ...wait - what? why? mistake?
+
+we still need to satisfy:
+
+  h + f^z_x + g^z_y = a_x + b_y
+
+maybe with a more symmetric choice like:
+
+  a_x = h/2 + f^z_x
+  b_y = h/2 + g^z_y
+  
+or:
+
+  a_x = h/2 + g^z_y
+  b_y = h/2 + f^z_x
+
+or:
+
+  a_x = (h + f^z_x + g^z_y)/2
+  b_y = (h + f^z_x + g^z_y)/2
+
+we could get somewhere? maybe require:
+
+  F_x + G_y = d(x,y,z)           prescribe divergence as d (H_z assumed 0)
+
+using our equations (1) for F,G: F = b + g^z, G = a - f^z
+
+  d = (b + g^z)_x + (a - f^z)_y
+    = a_y + b_x - f^z_y + g^z_x
+
+we still have to satisfy (2), so we get the two equations:
+
+  C := h + f^z_x + g^z_y = a_x + b_y
+  D := d + f^z_y - g^z_x = a_y + b_x
+
+set b_y = 0 as before, compute a_x, integrate to get a, compute a_y, compute
+b_x = D - a_y, integrate to get b 
+
+the code doesn't work: the divergence is indeed zero, but F,G,H seems not to 
+be a vector potential anymore - some coeffs in the computed curl match f,g,h 
+but others are totally wrong (it's not a precision issue) - i guess our 
+integration constants a(x,y), b(x,y) do in fact depend on z? maybe we can't 
+simply set b_y = 0 as before anymore. maybe we should write out the 2 
+equations C = ..., D = ... in terms of all the coefficients involved, giving
+ a large system of linear equations for all coeffs of a,b?
+
+-------------------------------------------------------------------------------
+
+Creating a gradient field with a given divergence. The idea is to obtain the 
+difference between a desired divergence and the divergence of the field 
+created by the algo above and then add a gradient field to it that has the
+difference-divergence. That way, we may create a vector potential with any 
+desired divergence - often zero is a convenient choice
+
+A gradient field must satisfy the Laplace equation. In addition to that, we 
+require the divergence to be given by a specific function. So, we are looking 
+for a vector field f,g,h that simultaneously satisfies:
+
+  f_xx + g_yy + h_zz = 0            Laplace equation
+  f_x  + g_y  + h_z  = d(x,y,z)     Divergence is specified by d(x,y,z)
+
+Can we set h = 0? Let's try it:
+
+  f_xx + g_yy = 0
+  f_x  + g_y  = d
+  
+  f_x = d - g_y
+  f   = (d - g_y)^x + a(y)
+
+-------------------------------------------------------------------------------
+
+Let's consider the 2D case first and let's be a bit more general by not 
+setting the Laplacian to zero but to some arbitrary polynomial L(x,y) and call 
+the divergence D(x,y). We have the two equations:
+
+  f_x  + g_y  = D
+  f_xx + g_yy = L
+
+Let's denote the coefficients of the matrices for the bivariate polynomials 
+f,g by a_ij, b_ij. Then, our two equations can be written in terms of the 
+coeffcients as:
+
+        i*a_ij +       j*b_ij = D_ij      i=1..M, j=1..N
+  (i-1)*i*a_ij + (j-1)*j*b_ij = L_ij      i=2..M, j=2..N
+
+where D_ij, L_ij are the polynomial coefficients of the divergence and 
+Laplacian. Let's solve the first equation for b_ij:
+
+  b_ij = (D_ij - i*a_ij) / j
+
+and plug the result into the second:
+
+  (i-1)*i*a_ij + (j-1)*(D_ij - i*a_ij) = L_ij
+
+and solve for a_ij:
+
+  (i-1)*i*a_ij + (j-1)*D_ij - (j-1)*(i*a_ij) = L_ij
+  (i-1)*i*a_ij - (j-1)*i*a_ij = L_ij - (j-1)*D_ij
+  ((i-1)-(j-1))*i * a_ij = L_ij - (j-1)*D_ij
+  
+  a_ij = (L_ij - (j-1)*D_ij) / (((i-1)-(j-1))*i)
+  
+That should be it - we can compute a_ij from the known D_ij and L_ij and once 
+we have them, we can compute b_ij by the equation further above. -> Try it!
+If it works, we can just set L_ij to all zeros, if we want a gradient field 
+with a given divergence. This should hopefully work for the 3D case, too. We 
+just have to use:
+
+  a_ijk = (L_ijk - (j-1)*D_ijk) / (((i-1)-(j-1))*i)
+  b_ijk = (D_ijk - i*a_ijk) / j
+
+What about the division by zero when i = j for the a_ijk and when j = 0 for the 
+b_ijk? How about defining a (2D) vector field not via divergence and Laplacian 
+but by divergence and (2D) curl or curl and Laplacian? Maybe the function could 
+be called divAndCurlToField, divAndLapToField, etc. Does this uniquely determine
+all coeffs? the equations are only valid for certain ranges of indices - what 
+about the other coeffs? can they be chosen freely?
+
+
+...wait - no: f_xx + g_yy is not the Laplacian! The Laplacian is defined for a 
+scalar field! We are actually looking for a scalar potential P(x,y) which 
+satisfies:
+
+  P_x  + P_y  = D
+  P_xx + P_yy = L
+
+in terms of coefficients, this means:
+
+        i*P_ij +       j*P_ij = D_ij           i=1..M, j=1..N
+  (i-1)*i*P_ij + (j-1)*j*P_ij = L_ij           i=2..M, j=2..N
+
+no - this is still wrong. If we can find a scalar field with a given divergence, 
+it's Laplacian it automatically zero - we have just one equation:
+
+  i*P_ij + j*P_ij = D_ij           i=1..M, j=1..N
+
+which we can easily solve for P_ij:
+
+  P_ij = D_ij / (i + j)           i=1..M, j=1..N
+
+no - still wrong: P_x and P_y is supposed to be our gradient field. To get 
+its divergence, we must differentiate once more (and add the results), so:
+
+  (i-1)*i*P_ij + (j-1)*j*P_ij = D_ij        i=2..M, j=2..N
+
+so:
+
+  P_ij = D_ij / (i*(i-1) + j*(j-1))         i=2..M, j=2..N
+
+i think, for i,j < 2, we can freely choose whatever we want. To get the desired
+vector field f,g we just take partial derivatives, i.e. the gradient of P
+...still wrong: we need to shift indices:
+
+  P_ij = D_{i-2,j-2} / (i*(i-1) + j*(j-1))         i=2..M, j=2..N
+
+M = D.degX, N = D.degY
+
+or like this?:
+
+  (m-1)*m*P_{m+2,n} + (n-1)*n*P_{m,n+2} = D_mn        m=2..M, n=2..N
+  
+  choose P_{m+2,n} freely (for example, zero) and use:
+  
+  P_{m,n+2} = (D_mn - (m-1)*m*P_{m+2,n}) / ((n-1)*n)
+  
+  
+
+
+
+
+
+
+
+
+needs to be tested
+see:
+http://galileo.math.siu.edu/Courses/251/S12/vpot.pdf

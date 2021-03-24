@@ -52,7 +52,7 @@ public:
   actually exists literally). In practice it's the largest of the small values, i.e. the front
   element of the min-heap of large alues in our double-heap. So what this function actually does is
   to update the sizes of the max-heap (of small values) and the min-heap (of large values) in the
-  double-heap. But conceptually, think about it simply as the readout index in an array of stored
+  double-heap. But conceptually, think about it simply as the readout index in an array of sorted
   past values. */
   void setReadPosition(int newPosition, bool hard = false)
   { setLengthAndReadPosition(L, newPosition, hard); }
@@ -350,7 +350,7 @@ protected:
 
   std::vector<Node>  small, large;     // storage arrays of the nodes
   rsDoubleHeap<Node> dblHp;            // maintains large/small as double-heap
-  std::vector<int>   keyBuf;           // circular buffer of heap keys - rename to keyBuf
+  std::vector<int>   keyBuf;           // circular buffer of heap keys
   rsDelayBuffer<T>*  sigBuf = nullptr; // (possibly shared) buffer of delayed input samples
 
   int bufIdx = 0;    // index into keyBuf, mayb rename to keyIdx
@@ -537,6 +537,8 @@ public:
   // *was* produced most recently, not to the sample that *will be* produced next
 
 
+  T getFrequency() const { return T(1) / length; }
+
   //-----------------------------------------------------------------------------------------------
   /** \name Processing */
 
@@ -558,7 +560,7 @@ public:
     return loGain * yL + hiGain * yH;
   }
   // maybe factor out a function to produce lowpass and highpass getSampleLoHi or something at the
-  // same time - client code may find that useful - or mayb getOutputs to be consistent with
+  // same time - client code may find that useful - or maybe getOutputs to be consistent with
   // rsStateVariableFilter
 
   /** Resets the filter into its initial state. */
@@ -571,7 +573,7 @@ public:
 
   /** Updates the internal algorithm parameters and embedded objects according to the user
   parameters. This is called in getSample, if the state is dirty but sometimes it may be
-  convenient to call it from client code too */
+  convenient to call it from client code, too. */
   virtual void updateInternals()
   {
     // compute internal and set up core parameters:
@@ -590,10 +592,17 @@ protected:
   //static void convertParameters(T length, T quantile, T sampleRate, int* L, int* p, T* w, T* d);
   // obsolete - delete soon
 
+  /** Returns the maximum length in samples that may be needed for the delayline and core 
+  buffers. */
+  int getMaxRequiredLengthInSamples()
+  {
+    return (int) ceil(maxLength * sampleRate); // maxLength is a user parameter in seconds
+  }
+
   /** Allocates the memory used for the delay-buffers, heaps, etc. */
   virtual void allocateResources()
   {
-    int mL = (int) ceil(maxLength * sampleRate);
+    int mL = getMaxRequiredLengthInSamples();
     core.setMaxLength(mL);
     delayLine.setCapacity(mL);
   }

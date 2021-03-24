@@ -267,6 +267,11 @@ public:
   patchFormatIndex of the state and the module don't match. Override this function in your subclass
   to do the actual conversion. */
   virtual XmlElement convertXmlStateIfNecessary(const XmlElement& xmlState);
+  // it is a bit inefficient to return the new xml - it has to be created from the old - maybe use
+  // XmlElement* convertXmlStateIfNecessary(const XmlElement* oldXml) that just returns the pointer
+  // if there's nothing to do. it implies that we have to change setStateFromXml to take a pointer 
+  // too - maybe keep both versions - but maybe that's not true since c++11 becuase of return-value 
+  // optimization?
 
   /** Resets all the parameters to their default values. */
   virtual void resetParametersToDefaultValues();
@@ -345,6 +350,16 @@ protected:
 
   rsSmoothingManager* smoothingManager = nullptr;
   MetaParameterManager* metaParamManager = nullptr;
+
+  // ToDo:
+  // double dryGain = 0.0;
+  // double wetGain = 1.0;
+  // to mix between input and output i.e. dry/wet. the idea is that source may modules want to add
+  // their output to what's already there (for stacking, layering, parallel connection -> both 
+  // gains = 1) whereas filters and effects may want to replace the input with the output (serial 
+  // connection: dry = 0, wet = 1). Having these two gains provides a flexible way to facilitate 
+  // this and more. These should also be saved and recalled, of course (but saved only when not at 
+  // default settings)
 
   double triggerInterval = 0.0;    // interval (in beats) for calls to trigger()
   bool saveAndRecallState = true;  // indicates, that this module wants to save/recall its state
@@ -426,9 +441,12 @@ protected:
 /** A subclass of AudioModule that accepts MIDI input. If you derive your effect or instrument from
 this baseclass and wrap it into a juce::AudioProcessor (via the wrapper class jura::AudioPlugin),
 the plugin will have a MIDI input. Also, you can override the event handler methods in your 
-subclass (noteOn, noteOff, setMidiController, etc.) in order to respond to incoming MIDI events  */
+subclass (noteOn, noteOff, setMidiController, etc. - inherited from rsMidiMessageDispatcher) in 
+order to respond to incoming MIDI events. You can also override handleMidiMessage and do the 
+dispatch yourself. */
 
-class JUCE_API AudioModuleWithMidiIn : public ModulatableAudioModule
+class JUCE_API AudioModuleWithMidiIn : public ModulatableAudioModule, 
+  public rsMidiMessageDispatcher
 {
 
 public:
@@ -445,111 +463,232 @@ public:
   // \name Event processing:
 
   /** Handles a generic MidiMessage. */
-  virtual void handleMidiMessage(MidiMessage message);
+  void handleMidiMessage(MidiMessage message) override;
 
-  /** Triggered by a note-on event. */
-  virtual void noteOn(int noteNumber, int velocity) {}
-
-  /** Triggered by a note-off event. */
-  virtual void noteOff(int noteNumber) {}
-  // todo: support note-off velocity
-
-  /** Triggered by an all-notes-off event. */
-  virtual void allNotesOff() {}
-
-  /** Overrides setMidiController which is inherited from both base-classes - and we simply we pass
-  through the function call to both of them here. */
-  virtual void setMidiController(int controllerNumber, float controllerValue);
-
-  /** Triggered by a pitch-bend event. */
-  virtual void setPitchBend(int pitchBendValue);
-
-  /** Triggered by an aftertouch event. */
-  virtual void setAfterTouch(int afterTouchValue) {}
-
-  /** Triggered by a channel pressure event. */
-  virtual void setChannelPressure(int channelPressureValue) {}
+  /** Overrides setMidiController */
+  void setMidiController(int controllerNumber, float controllerValue) override;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(AudioModuleWithMidiIn)
 };
 
 //=================================================================================================
 
-class rsVoiceManager // stub - maybe move to rosic
-{
-
-};
-
 /** Baseclass for polyphonic AudioModules. They have polyphonic audio outputs, so you can chain a 
 polyphonic oscillator with a polyphonic filter and drop in some polyphonic modulators in ToolChain.
 
-...just a stub, at the moment....tbc.... */
+...under construction....tbc.... */
 
 class JUCE_API AudioModulePoly : public AudioModuleWithMidiIn 
-  // maybe don't inherit - the class is a mix-in - maybe rename to 
-  // PolyphonicModule (such that the name doesn't suggest being a subclass of AudioModule
 {
 
 public:
 
   /** Constructor. May set up the managers. */
   AudioModulePoly(CriticalSection *lockToUse, MetaParameterManager* metaManagerToUse = nullptr, 
-    ModulationManager* modManagerToUse = nullptr, rsVoiceManager* voiceManagerToUse = nullptr);
+    ModulationManager* modManagerToUse = nullptr);
 
-
+  virtual ~AudioModulePoly() { }
 
   //-----------------------------------------------------------------------------------------------
-  // \name Setup:
+  // \name Setup
 
+  /** Sets the voice manager for this module and recursively for all the child modules. This will 
+  trigger a call to allocateVoiceResources because the amount of resources needed depends on the
+  maxNumVoices value which is a member of rsVoiceManager, so if the voiceManager changes, the
+  resources (like states of dsp objects) may need to be (re)allocated. Typically, this just happens
+  once, soon after construction. */
   void setVoiceManager(rsVoiceManager* managerToUse);
+  // todo: maybe make it optional (true by default) to set it also for the child modules
 
+  /** Overriden in order to set the voice manager for the child modules. */
+  void addChildAudioModule(AudioModule* moduleToAdd) override;
+
+  /** Sets the buffer into which the individual voice outputs shall be written. It must be of 
+  length 2*maxNumVoice where the factor two comes from the two channels for stereo signals. */
+  void setVoiceSignalBuffer(double* buffer) { voicesBuffer = buffer; }
+
+  /** Switches the module into monophonic mode. The idea is that polyphonic modules should be 
+  able to optionally behave exactly as if they would be implemented without making any use of the
+  polyphony infrastructure. By default i.e. after construrction, an AudioModulePoly will actually 
+  be in polyphonic mode, because it would be confusing otherwise (i guess). The feature is mostly 
+  meant to facilitate upgrading monophonic module classes to polyphonic ones later without breaking
+  any patches. Patches involvong the old monophonic modulators could use the upgraded polyphonic 
+  versions the same way as before by just switching them into monophonic mode. */
+  virtual void setMonophonic(bool shouldBeMonophonic);
 
   //-----------------------------------------------------------------------------------------------
-  // \name Inquiry:
+  // \name Inquiry
 
   // int getMaxNumVoices();
 
+  /** Returns a const pointer to our voiceManager which can be used by the caller to inquire 
+  things about the current processing state like the number of active voices etc. */
+  const rsVoiceManager* getVoiceManager() const { return voiceManager; }
 
+  //-----------------------------------------------------------------------------------------------
+  // \name Callbacks
+
+  /** Overriden to inquires from the voiceManager which voice was used for the most recently 
+  triggered note and then calls noteOnForVoice with that. Finalized because subclasses are 
+  supposed to override noteOn(int key, int vel, int voice) instead (which is called from this). */
+  void noteOn(int key, int vel) override final;
+
+  /** Overriden in order to invoke the per voice callback for the voice that is used for the new 
+  note for those polyphonic parameters that are not connected to any modulation sources. For those 
+  that are connected, the callbacks will be called in the audio process call by the modulation 
+  system but for the disconnected ones, we must do it here. Finalized because subclasses are 
+  supposed to override noteOn(int key, int vel, int voice) instead (which is called from this). */
+  void noteOnForVoice(int key, int vel, int voice) override final;
+
+  // todo: maybe finalize noteOffForVoice
+
+  /** Can be overriden by subclasses to respond to note-on events for a particular voice. Can be 
+  used in audio processors (oscillators, filters, etc.) to reset oscillator phases, filter states,
+  etc. and in modulators (envelopes, etc.) to reset the position in the envelope etc. */
+  virtual void noteOn(int key, int vel, int voice) {}
+  // maybe make this purely virtual
+
+  // todo:
+  //virtual void noteOff(int key, int vel, int voice) {}
+
+  /** Supposed to be called on note-on when the given voice should immediately switch to the new 
+  pitch due to having just been grabbed from pool of idle voices or was stolen and must now play a 
+  new pitch. It may also be called per sample, when the note pitch of a voice is in transition to 
+  a new value due to glide. The pitch given is in units of midi-note numbers, but as continuous 
+  value. Subclasses can override this in order to implement their required response, like - for 
+  example - setting the frequency of an oscillator to the frequency that corresponds to the new 
+  pitch. The pitch value already has microtuning baked in, but not pitch-wheel. This is because 
+  microtuning is handled globally but the response to pitch-wheel is implemented via the modulation
+  system. Pitch-Wheel is available as modulator and can be routed to the parameters at will. */
+  virtual void setVoiceKeyPitch(int voice, double pitch) {}
+  // obsolete? should this not better be handled by a modulator module? maybe the NotePitch/Freq
+  // modulators should have glide already baked in? i think that would make sense
+
+  virtual void setVoiceVelNorm(int voice, double pitch) {}
+  // similar to setVoiceKeyPitch but for (normalized) velocity 
 
   //-----------------------------------------------------------------------------------------------
   // \name Audio processing:
 
-  virtual void processBlockVoice(double **inOutBuffer, int numChannels, int numSamples, int voice) 
-  {
+  /** Must be overriden by subclasses to produce a stereo sample frame at a time. */
+  virtual void processStereoFrameVoice(double *left, double *right, int voice) = 0;
 
-  }
+  /** Overriden in order to first compute all the voice outputs via calling 
+  processStereoFramePoly and writing them into our voicesBuffer and them summing them into 
+  left/right. */
+  void processStereoFrame(double *left, double *right) override;
 
-  virtual void processStereoFrameVoice(double *left, double *right, int voice) 
-  {
-  
-  }
+  /** Fills the given buffer with the stereo outputs of the voices. It just calls 
+  processStereoFrameVoice in a loop over the active voices using the buffer for the left/right
+  pointer parameters. Stereo signals are stored interleaved - buffer[0], buffer[1] is the pair for
+  the 1st voice etc. */
+  virtual void processStereoFramePoly(double *buffer, int numActiveVoices);
 
-  virtual void processBlockPoly(double ***inOutBuffer, int numChannels, int numSamples) 
-  {
+  // maybe add later for optimization:
+  //virtual void processBlockVoice(double **inOutBuffer, int numChannels, int numSamples, int voice) { }
+  //virtual void processBlockPoly(double ***inOutBuffer, int numChannels, int numSamples) {}
+  //virtual void processStereoFramePoly(double **left, double **right) {}
 
-  }
 
-  virtual void processStereoFramePoly(double **left, double **right) 
-  {
+  //-----------------------------------------------------------------------------------------------
+  // \name Misc:
 
-  }
-
+  /** Your subclass should override this to allocate the DSP resources for the voices. When this 
+  function gets called, it is assumed that the voiceManager has already been assigned (in fact, it 
+  is getting called from setVoiceManager), so in your overriden implementation, you can access the 
+  voiceMananger member to inquire things the desired maximum number of voices which will be 
+  relevant for knowing how many core DSP objects you need. */
+  virtual void allocateVoiceResources() = 0;
+  // Maybe it should have a boolean parameter to decide whether it should get called recursively on
+  // the child modules. In our setVoiceManager we would pass false because the function calls 
+  // itself recursively on the child modules and also calls allocateVoiceResources, so we would end
+  // up re-allocating twice. But in other circumstances it may make more sense to call it on the 
+  // child modules, so we may need both options.
 
 protected:
 
-  rsVoiceManager* voiceManager;
+
+  rsVoiceManager* voiceManager = nullptr;
+
+  bool monophonic = false;
+
+  double *voicesBuffer = nullptr; // should be of length 2*maxNumVoices (2 for the 2 channels)
+  // hmm - i'm not sure, if that's a good design - the motivation for introducing this buffer is
+  // not having to change ToolChain::processBlock such that the realtime code of mono and poly
+  // modules can be handled uniformly there...and that requires that we need to write our sample
+  // data somewhere else - we cant use the buffers that are passed to processBlock because they
+  // are only for monophonic signals. maybe we should use generic processFrame(double* buffer), 
+  // processBlock(double* buffer) functions... or introduce processFramePoly already in the
+  // AudioModule baseclass and always call that
+  // ...or maybe we should actually own the voicesBuffer here - re-using the same buffer for 
+  // various modules may be a premature optimization.
 
 };
 
+//=================================================================================================
 
+/** Baseclass for monophonic modulator modules. */
 
+class JUCE_API ModulatorModuleMono : public AudioModuleWithMidiIn, public ModulationSource
+{
 
+public:
 
+  using AudioModuleWithMidiIn::AudioModuleWithMidiIn;  // inherit constructors
 
+};
 
+//=================================================================================================
 
+/** Baseclass for polyphonic modulator modules. */
 
+class JUCE_API ModulatorModulePoly : public AudioModulePoly, public ModulationSourcePoly
+{
+  // ToDo: Maybe experiment with the order of the multiple inheritance. This affects the memory 
+  // layout of the class and may therefore affect performance. It should not affect functionality.
 
+public:
+
+  ModulatorModulePoly(CriticalSection* lockToUse,
+    MetaParameterManager* metaManagerToUse = nullptr,
+    ModulationManager* modManagerToUse = nullptr)
+    : AudioModulePoly(lockToUse, metaManagerToUse, modManagerToUse) {}
+
+  /** Must be overriden by subclasses to allocate the DSP sources. It serves the same purpose as 
+  AudioModulePoly::allocateVoiceModResources but for modulators. We give it a different name in 
+  order to make it purely virtual because we have already overriden the allocateVoiceResources
+  here, so we need a different name in order to make it purely virtual again. We do this because
+  ModulatorModulePoly needs to always allocate the slots for the voice output signals and we do 
+  not want to force subclasses to call the basclass method - that would just add more boilerplate
+  and could be forgotten as well. */
+  virtual void allocateVoiceModResources() = 0;
+
+  /** Sets the modulator into monophonic mode in which case it should behave in the same way as 
+  truly monophonic object that doesn't use the polyphony system would.  */
+  void setMonophonic(bool shouldBeMonophonic) override
+  {
+    AudioModulePoly::setMonophonic(shouldBeMonophonic);
+    ModulationSourcePoly::setMonophonic(shouldBeMonophonic);
+    // Thats a bit ugly: we inherit a "monophonic" flag and a setter for it from both baseclasses.
+    // ToDo: try to find a better design that avoids this
+  }
+
+  // Finalize all the audio processing callbacks - they are not suppsoed not be used for anything 
+  // anymore and just pass the audio through:
+  void processBlock(double** inOutBuffer, int numChannels, int numSamples) override final {}
+  void processStereoFrame(double* left, double* right) override final {}
+  void processStereoFrameVoice(double* left, double* right, int voice) override final {}
+  void processStereoFramePoly(double* buffer, int numActiveVoices) override final {}
+
+  /** Overriden to trigger the allocation of the modulator output signal slots and triggers 
+  allocateVoiceModResources which must be overriden by subclasses. */
+  void allocateVoiceResources() override final
+  {
+    ModulationSourcePoly::allocateVoiceOutputPins(voiceManager);
+    allocateVoiceModResources();
+  }
+
+};
 
 //=================================================================================================
 
@@ -781,6 +920,7 @@ protected:
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SampleBasedAudioModuleEditor)
 };
 
+//=================================================================================================
 
 
 #endif 

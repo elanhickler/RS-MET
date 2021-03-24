@@ -1,9 +1,6 @@
 #ifndef rosic_AcidPattern_h
 #define rosic_AcidPattern_h
 
-//// rosic-indcludes:
-//#include "../math/rosic_ElementaryFunctionsReal.h"
-
 namespace rosic
 {
 
@@ -17,11 +14,20 @@ namespace rosic
   {
   public:
 
-    int  key;
-    int  octave;
+    //int  key;     //
+    //int  octave;
+    char key;
+    char octave;
     bool accent;
     bool slide;
     bool gate;
+    // maybe use char to save memory and maybe the octave,accent,slide,gate can all be packed into
+    // a single char, too - we want to keep 128 patterns in memory, so we really need to take care
+    // to keep the size small
+    // ToDo: Maybe have other per note data...maybe pan (maybe 9 steps from -4..+4)...and/or make 
+    // it continuous...maybe also the accent paramater - maybe use a char for accent and pan and 
+    // let both have 128 steps. On the gui, we could present partial accents (between 0 and 1) as 
+    // fainter and/or smaller black circles
 
     AcidNote()
     {
@@ -31,6 +37,7 @@ namespace rosic
       slide  = false;
       gate   = false;
     }
+
 
     bool isInDefaultState()
     { return key == 0 && octave == 0 && accent == false && slide == false && gate == false; }
@@ -82,6 +89,9 @@ namespace rosic
     /** Randomizes all notes in the pattern. \todo: restrict possible note-values to some scales*/
     void randomize();
 
+    /** Sets the number of steps in this pattern. Must be <= maxNumSteps. */
+    void setNumSteps(int newNumber);
+
     /*
     void setRandomSeed(int newSeed);
     void resetRandomSeed();
@@ -93,7 +103,34 @@ namespace rosic
     */
 
     /** Circularly shifts the whole pattern by the given number of steps. */
-    void circularShift(int numStepsToShift);
+    void circularShiftAll(int numStepsToShift);
+
+    // under construction:
+    void circularShiftAccents(int numStepsToShift);
+    void circularShiftSlides( int numStepsToShift);
+    void circularShiftOctaves(int numStepsToShift);
+    void circularShiftNotes(  int numStepsToShift); 
+    // should shift key and gates? maybe it can make sense to shift them seperately?
+
+
+    void reverseAll();
+    void reverseAccents();
+    void reverseSlides();
+    void reverseOctaves();
+    void reverseNotes();
+
+    void invertAccents();
+    void invertSlides();
+    void invertOctaves();
+
+    void swapAccentsWithSlides();
+    void xorAccentsWithSlides();
+    void xorSlidesWithAccents();
+
+    ///** Pastes the content from the given buffer into our notes array */
+    //void pasteFromBuffer(AcidNote* buffer, int bufferLength) 
+    //{ clear(); RAPT::rsArrayTools::copy(buffer, notes, RAPT::rsMin(bufferLength, numSteps)); }
+    // needs test
 
     //---------------------------------------------------------------------------------------------
     // inquiry:
@@ -129,6 +166,11 @@ namespace rosic
     /** Returns a pointer to the note at the given step. */
     AcidNote* getNote(int step) { return &notes[step]; }
 
+    ///** Copies the content of our notes array into the given buffer. */
+    //void copyToBuffer(AcidNote* buffer, int bufferLength) const
+    //{ RAPT::rsArrayTools::copy(notes, buffer, RAPT::rsMin(bufferLength, numSteps)); }
+    // needs test
+
     //=============================================================================================
 
   protected:
@@ -138,6 +180,9 @@ namespace rosic
 
     int    numSteps;         // number of steps in the pattern
     double stepLength;       // step length in step units (16th notes)
+
+
+    friend class AcidSequencer;
 
   };
 

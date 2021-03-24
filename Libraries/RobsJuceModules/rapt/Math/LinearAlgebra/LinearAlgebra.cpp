@@ -169,8 +169,25 @@ void rsLinearAlgebra::eigenvector2x2_2(T a, T b, T c, T d, T* vx, T* vy, bool no
 // special cases are obtained by setting b=0 and maybe additionally d=a, these are the right 
 // eigenvectors - maybe have similar functions for the left eigenvectors?
 
-
-
+template<class T>
+void rsLinearAlgebra::solveMinNorm(T a, T b, T p, T* x, T* y)
+{
+  rsAssert(a*a + b*b > T(0), "At least one coeff must be nonzero or we get a division by zero");
+  T s = p / (a*a + b*b);
+  *x = s*a;
+  *y = s*b;
+}
+// Formulas can be derived by minimizing x^2 + y^2 subject to the constraint a*x + b*y - p = 0 
+// using a Lagrange multiplier l for the constraint. With Sage, it looks like this:
+// var("a b p l x y")
+// L = x^2 + y^2 + l*(a*x + b*y - p)  # Lagrange function L = L(x,y,l)
+// L_x = diff(L, x)                   # derivative of L with respect to x
+// L_y = diff(L, y)                   # derivative of L with respect to y
+// L_l = diff(L, l)                   # derivative of L with respect to l
+// solve([L_x==0,L_y==0,L_l==0],[x,y,l])
+//
+// result: [[x == a*p/(a^2 + b^2), y == b*p/(a^2 + b^2), l == -2*p/(a^2 + b^2)]]
+// see also: https://ask.sagemath.org/question/38079/can-sage-do-symbolic-optimization/
 
 
 

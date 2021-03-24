@@ -115,16 +115,18 @@ protected:
   AciDevilAudioModule *aciDevilModuleToEdit;
 
   juce::Rectangle<int>  globalRectangle, oscRectangle, filterRectangle, filterEnvRectangle, 
-    ampRectangle, sequencerRectangle;
+    ampRectangle, distRectangle, sequencerRectangle;
 
-  RTextField *globalLabel, *oscLabel, *filterLabel, *filterEnvLabel, *ampLabel, *sequencerLabel, 
-    *normalLabel, *accentLabel, *subOscLabel;
+  RTextField *globalLabel, *oscLabel, *filterLabel, *filterEnvLabel, *ampLabel, *distLabel, 
+    *sequencerLabel, *normalLabel, *accentLabel, *subOscLabel;
 
   rsAutomatableSlider *masterLevelSlider, *accentSlider, *slideTimeSlider, *waveformSlider, 
-    *subOscLevelSlider, *subOscWaveformSlider, *cutoffSlider, *resonanceSlider, *envModSlider, 
-    *normalDecaySlider, *normalAttackSlider, *accentDecaySlider, *accentAttackSlider, 
-    *upwardFractionSlider, *ampDecaySlider, *ampSustainSlider, *ampReleaseSlider, 
-    *distortionDriveSlider;
+    *pulseWidthSlider, *subOscLevelSlider, *subOscWaveformSlider, *cutoffSlider, *resonanceSlider, 
+    *envModSlider, *normalDecaySlider, *normalAttackSlider, *accentDecaySlider, 
+    *accentAttackSlider, *upwardFractionSlider, *ampDecaySlider, *ampSustainSlider, 
+    *ampReleaseSlider, *distortionDriveSlider;
+    // maybe we can use an array to reduce the number of member variables? ah - no, we need all the
+    // separate pointers in resized
 
   RTextField *filterModeLabel;
 

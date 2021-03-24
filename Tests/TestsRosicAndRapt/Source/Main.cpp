@@ -60,7 +60,7 @@ int main(int argc, char* argv[])
   //-----------------------------------------------------------------------------------------------
   // Unit tests:
   bool passed = true;
-  passed &= runUnitTestsRapt();
+  //passed &= runUnitTestsRapt();
   //passed &= runUnitTestsRosic();  // some tests there are still commented out
   //passed = passed;  // dummy
 
@@ -146,7 +146,7 @@ int main(int argc, char* argv[])
   //prototypeDesign();  // old implementation - todo: check gains of prototype filters
   //poleZeroPrototype();  // new implementation - but we don't need that
   //seriesConnectionDecay();
-  quantileFilter();
+  //quantileFilter();
 
   // Physics:
   //doublePendulum(); // takes long
@@ -171,6 +171,7 @@ int main(int argc, char* argv[])
   //waveformFractalization();
   //noise();
   //noiseTriModal();
+  //noiseWaveShaped();
   //blit();
   //blep();
   //polyBlep();
@@ -194,6 +195,7 @@ int main(int argc, char* argv[])
   //triSawOsc();
   //triSawOscAntiAlias();
   //xoxosOsc();
+  shepardTone();
 
   // Modulators:
   //attackDecayEnvelope();
@@ -255,10 +257,15 @@ int main(int argc, char* argv[])
   //numericIntegration(); // a.k.a. numeric "quadrature"
   //nonUniformArrayDiffAndInt();  // numeric differentiation and integration of sampled data
 //  uniformArrayDiffAndInt();  // under construction
+  //vertexMeshGradient();
+  //vertexMeshHessian();
 
+  //convolvePolynomials();   // obsolete
+  //convolvePiecewise();
   //shiftPolynomial();
   ////void stretchPolynomial();  // commented in header
   //monotonicPolynomials();
+  //mixedPolynomialRoots();
   //parametricBell();
   //partialFractionExpansion();
   //partialFractionExpansion2();
@@ -365,6 +372,7 @@ int main(int argc, char* argv[])
   //fakeResoDifferentDelays();
 
   // Modal Filters/Synthesis:
+  //twoPoleFilter();
   //modalFilter();        // impulse response of decaying-sine filter
   //modalFilterFreqResp();  // frequency response of attack/decay-sine filter - rename
   //attackDecayFilter();  // ...hmm..almost redundant
@@ -460,7 +468,7 @@ int main(int argc, char* argv[])
   //sincResamplerPassbandRipple();
   //sincResamplerSumOfTapWeights();
   //timeWarp();
-  //pitchDemodulation();
+  pitchFlattening();
   //phaseLockedCrossfade();
   //phaseLockedCrossfade2();
   //pitchDetectWithSilence();
@@ -533,6 +541,9 @@ int main(int argc, char* argv[])
   //createBass1();
   //createGong1();
   //createPluck1();
+  // ToDo: create from the same sample-sets also soundfonts with 1,2,3,4,6 samples per octave via
+  // key-crossfading (the default is 12 per octave, i.e. 1 sample per key) - compare them to find 
+  // the best trade-off between size and quality (probably 3 or 4?)
 
   //===============================================================================================
   // RoSiC tests:

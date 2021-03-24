@@ -329,7 +329,7 @@ bool testPolynomialArgumentShift(std::string &reportString)
 
   // establish coeffs of q(x) = p(x-x0):
   double q[order+1];
-  rsPolynomial<double>::coeffsForShiftedArgument(p, q, order, x0);
+  rsPolynomial<double>::shiftArgument(p, q, order, x0);
 
   // check, if q-coeffs have correct values:
   testResult &= q[0] == -316;
@@ -352,14 +352,16 @@ bool testPolynomialDiffAndInt(std::string &reportString)
   double ad[5];
   double ai[7];
 
-  rsPolynomial<double>::derivative(a, ad, 5);
+  using Poly = rsPolynomial<double>;
+
+  Poly::derivative(a, ad, 5);
   testResult &= (ad[0] == -1);
   testResult &= (ad[1] == 10);
   testResult &= (ad[2] == 21);
   testResult &= (ad[3] == -12);
   testResult &= (ad[4] == 10);
 
-  rsPolynomial<double>::integral(a, ai, 5, 2.0);
+  Poly::integral(a, ai, 5, 2.0);
   testResult &= (ai[0] ==  2.0);
   testResult &= (ai[1] ==  2.0/1.0);
   testResult &= (ai[2] == -1.0/2.0);
@@ -367,6 +369,27 @@ bool testPolynomialDiffAndInt(std::string &reportString)
   testResult &= (ai[4] ==  7.0/4.0);
   testResult &= (ai[5] == -3.0/5.0);
   testResult &= (ai[6] ==  2.0/6.0);
+
+  Poly p;           // should be the zero polynomial and have 1 coeff which is zero
+  p.shiftY(1);      // now the coeff should be one
+  p.integrate(1.0);
+  testResult &= p == Poly({1,1});
+  p.integrate(1.0);
+  testResult &= p == Poly({1,1,1./2});
+  p.integrate(1.0);
+  testResult &= p == Poly({1,1,1./2,1./6});
+  p.integrate(1.0);
+  testResult &= p == Poly({1,1,1./2,1./6,1./24});
+
+  // Test storing polynomials in arrays and integrating the array elements:
+  std::vector<Poly> polys;
+  polys.push_back(p);
+  polys.push_back(p);
+  polys.push_back(p);
+  polys[1].integrate(1.0);
+  testResult &= polys[1] == Poly({1,1,1./2,1./6,1./24,1./120});
+
+
 
   return testResult;
 }
@@ -459,22 +482,34 @@ bool testPolynomialComposition(std::string &reportString)
   std::string testName = "PolynomialComposition";
   bool testResult = true;
 
+  using Poly = rsPolynomial<double>;
+
   static const int na = 5;
   static const int nb = 4;
   static const int nc = na*nb;
   double a[na+1] = {2, -1, 5,  7, -3, 2}; // 2*x^5 - 3*x^4 + 7*x^3 + 5*x^2 - 1*x^1 + 2*x^0
   double b[nb+1] = {3,  1, 4, -5,  3};    //         3*x^4 - 5*x^3 + 4*x^2 + 1*x^1 - 3*x^0
   double c[nc+1];
-  rsPolynomial<double>::compose(a, na, b, nb, c);
+  Poly::compose(a, na, b, nb, c);
 
   // check, if the composed c-polynomial returns the same result as applying the 2nd b-polynomial
   // to the result of the 1st a-polynomial:
   double x = -3.0; // input value
   double y1, y2;
-  y1 = rsPolynomial<double>::evaluate(x,  a, na);
-  y1 = rsPolynomial<double>::evaluate(y1, b, nb);
-  y2 = rsPolynomial<double>::evaluate(x,  c, nc);
+  y1 = Poly::evaluate(x,  a, na);
+  y1 = Poly::evaluate(y1, b, nb);
+  y2 = Poly::evaluate(x,  c, nc);
   testResult &= (y1 == y2);
+
+  Poly p({2, -1, 5,  7, -3, 2});
+  Poly q({3,  1, 4, -5,  3});
+  Poly pq = p(q);
+  // Sage:
+  // p(x) = 2 - 1*x + 5*x^2 + 7*x^3 - 3*x^4 + 2*x^5
+  // q(x) = 3 + 1*x + 4*x^2 - 5*x^3 + 3*x^4
+  // p(q).expand()
+  testResult &= pq == Poly({476,704,3262,199,6627,-9747,16849,-26397,46908,-61886,82425,-106821,
+                            124440,-126114,120574,-106210,78177,-43290,16740,-4050,486});
 
   return testResult;
 }
@@ -1403,8 +1438,1037 @@ bool testQuadraticTo3Points()
   return r;
 }
 
+bool testBivariatePolynomial()
+{
+  bool r = true;
 
-//bool testPolynomial(std::string &reportString)
+  using Poly   = rsPolynomial<double>;
+  using BiPoly = rsBivariatePolynomial<double>;
+
+
+  BiPoly p(2, 3, {1,2,3,4, 5,6,7,8, 9,10,11,12});
+  // p(x,y) =    1     + 2*y      + 3*y^2      + 4*y^3  
+  //           + 5*x   + 6*x*y    + 7*x*y^2    + 8*x*y^3
+  //           + 9*x^2 + 10*x^2*y + 11*x^2*y^2 + 12*x^2*y^3
+
+  // sage:
+  // var("x y")
+  // p(x,y) = 1 + 2*y + 3*y^2 + 4*y^3 + 5*x + 6*x*y + 7*x*y^2 + 8*x*y^3 + 9*x^2 + 10*x^2*y + 11*x^2*y^2 + 12*x^2*y^3
+  // p(2,3), p(2,y), p(x,3)
+  //
+  // (2594, 68*y^3 + 61*y^2 + 54*y + 47, 462*x^2 + 302*x + 142)
+
+  double val, val2;
+  Poly   uni, uni2;
+  BiPoly bi;
+
+  val = p.evaluate(2, 3); r &= val == 2594;
+  uni = p.evaluateX(2);   r &= uni == Poly({47, 54, 61, 68});
+  val = uni(3);           r &= val == 2594;
+  uni = p.evaluateY(3);   r &= uni == Poly({142, 302, 462});
+  val = uni(2);           r &= val == 2594;
+  bi = p.derivativeX(); r &= bi == BiPoly(1, 3, {5,6,7,8, 18,20,22,24});
+  //    5    + 6*y    + 7*y^2    + 8*y^3 
+  //  + 18*x + 20*x*y + 22*x*y^2 + 24*x*y^3
+
+  bi = p.derivativeY(); r &= bi == BiPoly(2, 2, {2,6,12, 6,14,24, 10,22,36});
+  //    2      + 6*y      + 12*y^2
+  //  + 6*x    + 14*x*y   + 24*x*y^2
+  //  + 10*x^2 + 22*x^2*y + 36*x^2*y^2
+
+  // Test indefinite integration with respect to x:
+  bi = p.integralX(); BiPoly(3, 3, {0,0,0,0, 1,2,3,4, 2.5,3,3.5,4, 3,10./3,11./3,4});
+  //   0       + 0*y        + 0*y^2        + 0*y^3
+  // + 1*x     + 2*x*y      + 3*x*y^2      + 4*x*y^3
+  // + 5/2*x^2 + 3*x^2*y    + 7/2*x^2*y^2  + 4*x^2*y^3
+  // + 3*x^3   + 10/3*x^3*y + 11/3*x^3*y^2 + 4*x^3*y^3
+
+  // Test indefinite integration with respect to y:
+  bi = p.integralY(); r &= bi == BiPoly(2, 4, {0,1,1,1,1, 0,5,3,7*(1./3),2, 0,9,5,11*(1./3),3 });
+  //   0     + y       + y^2 + y^3 + y^4
+  // + 0*x   + 5*x*y   + 3*x*y^2   + 7/3*x*y^3    + 2*x*y^4
+  // + 0*x^2 + 9*x^2*y + 5*x^2*y^2 + 11/3*x^2*y^3 + 3*x^2*y^4
+
+  // Test definite integration with respect to x:
+  Poly A({1,-2,3});
+  Poly B({3,-5,1,-2});
+  uni = p.integralX(-2., 3.); r &= uni == Poly({122.5, 425./3, 965./6, 180});
+  uni = p.integralX( A,  3.); // verify!
+  uni = p.integralX(-2., B ); // verify!
+  uni = p.integralX( A,  B ); // verify!
+  // todo: let either of the two or both integration limits be a polynomial (in y)
+
+  // Test definite integration with respect to y:
+  uni = p.integralY(-2., 3.); r &= uni == Poly({110, 755./3, 1180./3});
+  // 1180/3*x^2 + 755/3*x + 110
+
+  // Construct bivariate polynomial as product of two univariate polynomials:
+  uni  = Poly({ 2,  3,  5,  7});
+  uni2 = Poly({11, 13, 17, 19, 23});
+  bi   = BiPoly::multiply(uni, uni2);
+  val  = bi.evaluate(2, 3);
+  val2 = uni(2) * uni2(3);
+  r &= val == val2;
+
+  // Construct bivariate polynomial from a univariate polynomial in the variable a*x + b*y for 
+  // given a,b
+  //
+  // var("x y a b")
+  // p(x) = 2 + 3*x + 5*x^2 + 7*x^3
+  // p(11*x + 13*y).expand()
+  //
+  //   2        + 39*y        + 845*y^2     + 15379*y^3
+  // + 33*x     + 1430*x*y    + 39039*x*y^2 + 0
+  // + 605*x^2  + 33033*x^2*y + 0           + 0
+  // + 9317*x^3 + 0           + 0           + 0 
+  double a = 11, b = 13;
+  double x = 2,  y = 3;
+  bi   = BiPoly::composeWithLinear(uni, a, b);
+  val  = uni(a*x + b*y);
+  val2 = bi.evaluate(x, y);
+  r &= val == val2;
+  bi   = BiPoly::composeWithLinearOld(uni, a, b);
+  val2 = bi.evaluate(x, y);
+  r &= val == val2;
+
+  // Multiply bivariate polynomial with univariate polynomial in y:
+  //
+  // var("x y")
+  // p(x,y) = 1 + 2*y + 3*y^2 + 4*y^3 + 5*x + 6*x*y + 7*x*y^2 + 8*x*y^3 + 9*x^2 + 10*x^2*y + 11*x^2*y^2 + 12*x^2*y^3
+  // q(y) = 2 + 3*y + 5*y^2 + 7*y^3
+  // (p*q).expand()
+  //
+  //    2     + 7*y      + 17*y^2     + 34*y^3      + 41*y^4      + 41*y^5      + 28*y^6
+  // + 10*x   + 27*x*y   + 57*x*y^2   + 102*x*y^3   + 101*x*y^4   + 89*x*y^5    + 56*x*y^6
+  // + 18*x^2 + 47*x^2*y + 97*x^2*y^2 + 170*x^2*y^3 + 161*x^2*y^4 + 137*x^2*y^5 + 84*x^2*y^6
+  bi = p.multiplyY(uni);
+  r &= bi == BiPoly(2, 6, {2,7,17,34,41,41,28, 10,27,57,102,101,89,56, 18,47,97,170,161,137,84 });
+
+  // Test evaluation with a polynomial as argument:
+  // var("x y")
+  // p(x,y) = 1 + 2*y + 3*y^2 + 4*y^3 + 5*x + 6*x*y + 7*x*y^2 + 8*x*y^3 + 9*x^2 + 10*x^2*y + 11*x^2*y^2 + 12*x^2*y^3
+  // q(x) = 2 + 3*x + 5*x^2 + 7*x^3
+  // p(x,q).expand()
+  uni2 = p.evaluateY(uni);
+  r &= uni2 == Poly({49,295,1112,3091,6862,12511,18686,23377,23795,18844,11564,4116});
+
+  // var("x y")
+  // p(x,y) = 1 + 2*y + 3*y^2 + 4*y^3 + 5*x + 6*x*y + 7*x*y^2 + 8*x*y^3 + 9*x^2 + 10*x^2*y + 11*x^2*y^2 + 12*x^2*y^3
+  // q(y) = 2 + 3*y + 5*y^2 + 7*y^3
+  // p(q,y).expand()
+  uni2 = p.evaluateX(uni);
+  r &= uni2 == Poly({47,177,485,1098,1747,2375,2630,2064,1379,588});
+
+
+  // Test the construction of a potential and its gradient vector field from a given divergence:
+  //BiPoly D = BiPoly(2, 3, {1,2,3,4, 5,6,7,8, 9,10,11,12});   // prescribed divergence
+  //BiPoly D = BiPoly(2, 2, {1,2,3, 4,5,6, 7,8,9});   // prescribed divergence
+  BiPoly D = BiPoly(3, 3, {1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16});   // prescribed divergence
+  BiPoly P, P2;
+  divergenceToPotential4(D, P);                               // the scalar potential
+  BiPoly P_x  = P.derivativeX();                              // x-component of vector field
+  BiPoly P_y  = P.derivativeY();                              // y-component of vector field
+  BiPoly P_xx = P_x.derivativeX();
+  BiPoly P_yy = P_y.derivativeY();
+  BiPoly D2   = P_xx + P_yy;
+  // wrong: there are some extra nonzero coeffs in D2 - seems like there are 2 extra coeffs
+
+  //P = BiPoly(3, 3, {1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16});
+  //P_x  = P.derivativeX();                              // x-component of vector field
+  //P_y  = P.derivativeY();                              // y-component of vector field
+  //P_xx = P_x.derivativeX();
+  //P_yy = P_y.derivativeY();
+  //D    = P_xx + P_yy;
+  //divergenceToPotential(D, P2);
+
+  P = BiPoly(4, 5, {1,2,3,4,5,6, 7,8,9,10,11,12, 13,14,15,16,17,18, 19,20,21,22,23,24, 
+                    25,26,27,28,29,30});
+  P_x  = P.derivativeX();                              // x-component of vector field
+  P_y  = P.derivativeY();                              // y-component of vector field
+  P_xx = P_x.derivativeX();
+  P_yy = P_y.derivativeY();
+  D    = P_xx + P_yy;
+  potentialToDivergence(P, D2); 
+  r &= D2 == D;
+  divergenceToPotential1(D, P2);
+  potentialToDivergence(P2, D2); 
+  r &= D2.isCloseTo(D);
+  divergenceToPotential2(D, P2);
+  potentialToDivergence(P2, D2); 
+  r &= D2.isCloseTo(D);
+
+  //r &= D2 == D;
+
+  //BiPoly D2  = BiPoly::divergence2D(P_x, P_y);               // actual divergence of vector field
+  // this does not yet work!
+
+  return r;
+}
+
+bool testBivariatePolynomial2()
+{
+  // We consider the complex polynomial f(z) = z^n - 1 which has as its roots the n n-th roots of 
+  // unity. We want to find its Polya vector field and a potential function for that field
+
+  using Real    = double;  // try to use float (gives currently compiler errors)
+  using Complex = std::complex<Real>;
+  using PolyR   = rsPolynomial<Real>;
+  using PolyC   = rsPolynomial<Complex>;
+  using BiPolyR = rsBivariatePolynomial<Real>;
+  using BiPolyC = rsBivariatePolynomial<Complex>;
+
+  using C = Complex;
+
+  // Create the complex polynomial:
+  //int n = 4; PolyC p(n); p[0] = -1; p[n] =  1; // p(z) = z^n - 1
+  //PolyC p({1,3,5,-2,-1,2});
+  //PolyC p({2,-1,3,-3,5,2,4});
+  PolyC p({C(2,1),C(-1,2),C(3,-2),C(-3,1),C(5,-2),C(2,-1),C(4,-2)});  // with complex coeffs
+
+  // Find the Polya potential P(x,y):
+  BiPolyR P = BiPolyR::getPolyaPotential(p);
+
+  // Check, if the found potential has indeed the desired gradient by evaluating the partial 
+  // derivatives at some point. (todo: implement a way to directly compare the coeff matrices):
+  BiPolyR P_x = P.derivativeX();
+  BiPolyR P_y = P.derivativeY();
+
+  // Tests:
+  bool ok = true;
+
+  // Evaluate p, P_x, P_y at some point x,y and compare results:
+  Real x = 2.0, y = 3.0;
+  Real val1, val2;
+  Complex z(x, y);
+  val1 =  p(z).real(); val2 = P_x(x, y); ok &= val1 == val2;
+  val1 = -p(z).imag(); val2 = P_y(x, y); ok &= val1 == val2;
+
+  // Test the harmonic conjugate relationships between P_x, P_y
+  ok &= P_x.isHarmonic();
+  ok &= isHarmonic2(P_x); 
+  ok &= P_y.isHarmonic();
+  ok &= isHarmonic2(P_y); 
+  ok &= BiPolyR::areHarmonicConjugates(P_x, -P_y); // -P_y (not P_y!) is harmonic conjugate of P_x
+  ok &= BiPolyR::areHarmonicConjugates(P_y,  P_x); // the relation is antisymmetric (?)
+
+  // Try to reconstruct the original complex univariate polynomial from P_x, P_y
+  PolyC p2 = getComplexFromHarmonicUV(P_x, -P_y);
+  ok &= p2 == p;
+
+  // experimental - find an "associated polynomial" by swapping the roles of P_x, P_y in the 
+  // reconstruction:
+  PolyC p3 = getComplexFromHarmonicUV(P_y, P_x);
+  // looks like p3 has the real and imaginary parts swapped with respect to p - but also with a 
+  // sign flip: p3[i] = -Im{ p[i] } + i*Re{ p[i] } ... i think, this is a rotation by 90°, i.e. a
+  // multiplication by i? let's try it:
+  PolyC p4 = p; p4.scale(C(0,1)); ok &= p3 == p4;   // ...yep, indeed - nice!
+
+  //p2 = getComplexFromHarmonicU(P_x); // should reconstruct p
+  //p2 = getComplexFromHarmonicV(P_y); // seems to work except for the constant term
+
+
+  // evaluate the potential at some points:
+  val1 = P(+1, 0);  // -2/3 for p(z) = z^2 - 1, -4/5 for p(z) = z^4
+  val2 = P(-1, 0);  // +2/3 for p(z) = z^2 - 1, +4/5 for p(z) = z^4
+
+  // Observations:
+  // -at the zeros of the original function, we seem to see saddles in the potential
+  // -so far, i've not yet seen a potential that features minima or maxima - only saddles seem to
+  //  occur - investigate if this is always the case and try to find a theoretical explanation
+  //  ...maybe it's only because so far i have not used polynomials with complex coeffs?
+  //  -could this be related to features of minimal surfaces? they also tend to from saddles
+  // -saddles are easy to identify in topographic or equipotential plots - they look like crosses
+  // -could the value at the zeros be given by +-(1 - 1/(n+1)) for p(z) = z^n - 1, or maybe
+  //  exp(i*k) * (1 - 1/(n+1)) for k = 0...n or something?
+
+  // todo: 
+  // -plot some potentials to get a feeling for how they look like and how we can see features of
+  //  complex functions in them
+  // -plot them as topographic map - draw equipotentials and maybe field lines, too - obtain them 
+  //  by considering the differential equation (d/dt) f(x,y) = -grad(P(x,y))...or something
+  //  ...or maybe we can find the harmonic conjugate of the potential - i think, its equipotentials 
+  //  are indeed the field lines...i think, from these two, the complex potential can be 
+  //  constructed?
+  // -maybe use a coloring according to the absolute value of the gradient? that will show extrema
+  //  of the magnitude of the complex function
+  // -make a unit test and test it with more complicated complex polynomials p(z)
+
+
+
+
+
+  // test the harmonic conjugate creation function:
+  BiPolyR u, v, u2, v2;
+
+  u = BiPolyR(2,2,{0,0,-1, 0,0,0, 1,0,0});  // x^2 - y^2
+  v = BiPolyR(2,2,{0,0,0,  0,2,0, 0,0,0});  // 2*x*y
+  v2 = u.getHarmonicConjugate();
+  u2 = v.getHarmonicConjugate();
+  ok &= BiPolyR::areHarmonicConjugates(u,  v );    // make sure that the target functions are correct
+  ok &= BiPolyR::areHarmonicConjugates(u,  v2);    // works
+
+  //ok &= areHarmonicConjugates(u2, v );    // fails!
+  //ok &= areHarmonicConjugates(u2, v2);
+  // hmm - is it actually the case that if v is the harmonic conjugate of u then u is also the 
+  // harmonic conjugate of v? or is -u the harmonic conjugate of v? this is what seems to come out
+  // of the algorithm
+
+  // u(x,y) = 2*y^3 ? 6*x^2*y + 4*x^2 + 7*x*y + 4*y^2 + 3*x + 4*y + 4
+  // v(x,y) = 2*x^3 + (7/2)*x^2 + 6*x*y^2 + 8*x*y + 4*x + (7/2)*y^2 + 3*y
+  u  = BiPolyR(2,3,{-4,4,-4,2, 3,-7,0,0, 4,-6,0,0}); 
+  v  = BiPolyR(3,2,{0,3,-3.5, -4,8,-6, 3.5,0,0, 2,0,0}); 
+  v2 = u.getHarmonicConjugate();
+  ok &= v2.isCloseTo(v);
+
+  // Example from:
+  // https://math.stackexchange.com/questions/930000/calculating-a-harmonic-conjugate
+
+  //ok &= u2.isCloseTo(u);
+
+
+  //BiPolyR Q = getHarmonicConjugate(P);
+  //ok &= areHarmonicConjugates(P, Q);
+
+  Real r = 1.5;
+  //plotBivariatePolynomial(P, -r, +r, 31, -r, +r, 31);
+
+  u = BiPolyR(2,2,{0,0,1, 0,0,0, -1,0,0}); // -x^2 + y^2
+  bool harm = u.isHarmonic();
+
+
+  // Arithmetic operators:
+  u = BiPolyR(2,2,{1,2,3, 4,5,6, 7,8,9});
+  v = BiPolyR(2,2,{9,8,7, 6,5,4, 3,2,1});
+  BiPolyR uv;
+  uv = u+v; val1 = uv(x, y); val2 = u(x, y) + v(x, y); ok &= val1 == val2;
+  uv = u-v; val1 = uv(x, y); val2 = u(x, y) - v(x, y); ok &= val1 == val2;
+  uv = u*v; val1 = uv(x, y); val2 = u(x, y) * v(x, y); ok &= val1 == val2;
+  // maybe use polynomials with more interesting degrees (all values different and maybe higher)
+
+  // Composition of outer bivariate with inner univariate polynomial:
+  PolyR xt({1,2,3,4});
+  PolyR yt({2,3});
+  PolyR ut = BiPolyR::compose(u, xt, yt);
+  Real t = 5;
+  val1 = u(xt(t), yt(t));
+  val2 = ut(t);
+  ok  &= val1 == val2;
+
+
+  // Test evaluation of various types of integrals:
+
+  // Double intgral over a rectangular region:
+  // p(x,y) =   1*x^0*y^0 + 2*x^0*y^1 + 3*x^0*y^2
+  //          + 4*x^1*y^0 + 5*x^1*y^1 + 6*x^1*y^2
+  //          + 7*x^2*y^0 + 8*x^2*y^1 + 9*x^2*y^2
+  // x0 = 1, x1 = 2, y0 = 3, y1 = 4
+  //
+  // var("x y")
+  // p(x,y) =   1*x^0*y^0 + 2*x^0*y^1 + 3*x^0*y^2 + 4*x^1*y^0 + 5*x^1*y^1 + 6*x^1*y^2 + 7*x^2*y^0 + 8*x^2*y^1 + 9*x^2*y^2       
+  // p_ix = integrate(p, x, 1, 2)
+  // p_ix_iy = integrate(p_ix, y, 3, 4)
+  // p_ix_iy
+  //
+  // 6347/12 = 528.916666666667
+  val1 = u.doubleIntegralXY(1., 2., 3., 4.); ok &= val1 == 6347./12.;
+  val2 = u.doubleIntegralYX(1., 2., 3., 4.); ok &= val2 == 6347./12.;
+
+  // Path integral over a vector field:
+  // var("t")
+  // x(t) = 1*t^0 + 2*t^1 + 3*t^2 + 4*t^3
+  // y(t) = 2*t^0 + 3*t^1
+  // u = 1*x^0*y^0 + 2*x^0*y^1 + 3*x^0*y^2 + 4*x^1*y^0 + 5*x^1*y^1 + 6*x^1*y^2 + 7*x^2*y^0 + 8*x^2*y^1 + 9*x^2*y^2
+  // v = 9*x^0*y^0 + 8*x^0*y^1 + 7*x^0*y^2 + 6*x^1*y^0 + 5*x^1*y^1 + 4*x^1*y^2 + 3*x^2*y^0 + 2*x^2*y^1 + 1*x^2*y^2
+  // s = u*diff(x,t) + v*diff(y,t)
+  // r = integrate(s, t, -1, 2)
+  // r, N(r)
+  //
+  // 3392240031/154, 2.20275326688312e7
+  Real tol = 1.e-8;
+  val1 = BiPolyR::pathIntegral(u, v, xt, yt, -1., +2.);
+  val2 = 3392240031./154;;
+  ok  &= rsIsCloseTo(val1, val2, tol);
+  // todo: maybe check the relative instead of the absolute error (absolute error is largeish)
+
+
+  // Path integral over a scalar field:
+  // var("t")
+  // x(t) = 1*t^0 + 2*t^1
+  // y(t) = 2*t^0 + 3*t^1
+  // p = 1*x^0*y^0 + 2*x^0*y^1 + 3*x^0*y^2 + 4*x^1*y^0 + 5*x^1*y^1 + 6*x^1*y^2 + 7*x^2*y^0 + 8*x^2*y^1 + 9*x^2*y^2
+  // dx = diff(x,t)
+  // dy = diff(y,t)
+  // ds = sqrt(dx*dx + dy*dy) 
+  // s = p * ds 
+  // r = integrate(s, t, -1, 2)
+  // r, N(r)
+  //
+  // 102399/10*sqrt(13), 36920.4845056237
+  Real err;
+  tol = 1.e-15;
+  xt = PolyR({1,2});
+  yt = PolyR({2,3});
+  val1 = BiPolyR::pathIntegral(u, xt, yt, -1., +2.);
+  val2 = (102399./10.)*sqrt(13);
+  err  = (val2-val1)/val2;                // relative error - almost 1.e-4 - why so large?
+  ok  &= rsAbs(err) <= tol;
+  //ok  &= rsIsCloseTo(val1, val2, tol);
+
+  // https://www.youtube.com/watch?v=7mrsZzXmibg 
+
+  // Test Green's theorem in 2D: compare the double integral of the curl over a rectangle to the 
+  // path integral of the vector field itself along the boundary of the rectangle:
+  tol = 1.e-13;
+  Real x0 =  1, x1 = 3;
+  Real y0 = -1, y1 = 2;
+  BiPolyR curl = BiPolyR::curl2D(u, v);
+  val1 = curl.doubleIntegralXY(x0, x1, y0, y1);
+  val2 = BiPolyR::loopIntegral(u, v, x0, x1, y0, y1);
+  ok  &= rsIsCloseTo(val1, val2, tol);
+  // val1 seems to be more numerically precise
+
+  // Test Gauss' theorem in 2D:
+  BiPolyR divergence = BiPolyR::divergence2D(u, v);
+  val1 = divergence.doubleIntegralXY(x0, x1, y0, y1);
+  val2 = BiPolyR::outfluxIntegral(u, v, x0, x1, y0, y1);
+  ok  &= rsIsCloseTo(val1, val2, tol);
+
+  // Test the flux integral with more general curves:
+  // see https://www.khanacademy.org/math/multivariable-calculus/integrating-multivariable-functions/line-integrals-in-vector-fields-articles/a/flux-in-two-dimensions
+
+
+
+  // Curvature of surfaces:
+  BiPolyR w = BiPolyR(2,2,{6,5,4, 9,8,7, 3,2,1});
+  BiPolyR E, F, G;
+  firstFundamentalForm(u, v, w, E, F, G);
+
+  // todo:
+  // -flux and circulation integrals (integrals over divergence and curl)
+  // -double integral over region bounded by polynomial curves
+
+  rsAssert(ok);
+  return ok;
+}
+
+bool testTrivariatePolynomial()
+{
+  using Poly    = rsPolynomial<double>;
+  using BiPoly  = rsBivariatePolynomial<double>;
+  using TriPoly = rsTrivariatePolynomial<double>;
+
+  TriPoly p(3, 4, 5);
+  p.fillRandomly(-9.0, +9.0, 0, true); // maybe round to integers
+
+  bool ok = true;
+
+  double x = 5, y = 3, z = 2;
+  double val1, val2, val3;
+  val1 = p.evaluate(x, y, z);
+  BiPoly p_yz = p.evaluateX(x);
+  val2 = p_yz.evaluate(y, z);
+  ok &= val1 == val2;
+
+  // test compose:
+  double u = 2, v = 3;
+  BiPoly px(2,2,{1,2,3, 4,5,6, 7,8,9});           // px(u,v)
+  BiPoly py(2,2,{4,5,6, 1,2,3, 7,8,9});           // py(u,v)
+  BiPoly pz(2,2,{7,8,9, 4,5,6, 1,2,3});           // pz(u,v)
+  p = TriPoly(2,2,2);
+  p.fillRandomly(-3.0, +3.0, 0, true);
+  BiPoly p_uv = TriPoly::compose(p, px, py, pz);  // p(u,v)
+  x = px(u,v);
+  y = py(u,v);
+  z = pz(u,v);
+  val1 = p.evaluate(x, y, z);
+  val2 = p_uv.evaluate(u, v);
+  ok &= val1 == val2;
+  // ...values are getting big here!
+
+  // Test integration and differentiation:
+  TriPoly tmp;
+  tmp = p.integralX().derivativeX(); ok &= p == tmp;
+  tmp = p.integralY().derivativeY(); ok &= p == tmp;
+  tmp = p.integralZ().derivativeZ(); ok &= p == tmp;
+
+
+  // test triple integral:
+  double x0 = 1, x1 = 3, y0 = 2, y1 = 4, z0 = 3, z1 = 5;
+  p = TriPoly(1,1,1);
+  p.coeff(1,1,1) = 3.0;  // p(x,y,z) = 3*x*y*z
+  val1 = p.tripleIntegralXYZ(x0, x1, y0, y1, z0, z1);
+  ok &= val1 == 576;
+  // var("x y z")
+  // f = 3*x*y*z
+  // Fx   = integral(f,   (x, 1, 3))
+  // Fxy  = integral(Fx,  (y, 2, 4))
+  // Fxyz = integral(Fxy, (z, 3, 5))
+  // f, Fx, Fxy, Fxyz
+  //
+  // 3*x*y*z, 12*y*z, 72*z, 576
+
+  // todo: implement and test different orders of integration: XZY, YXZ, YZX, ZXY, ZYX
+
+
+
+
+  tmp = p.derivativeX(); val1 = tmp.evaluate(1,2,3); ok &= val1 == 18;
+  tmp = p.derivativeY(); val1 = tmp.evaluate(1,2,3); ok &= val1 == 9;
+  tmp = p.derivativeZ(); val1 = tmp.evaluate(1,2,3); ok &= val1 == 6;
+
+  // todo: test fluxIntegral
+  double u0 = -1, u1 = 1, v0 = -1, v1 = 1;
+  TriPoly fx(2,2,2), fy(2,2,2), fz(2,2,2);  // the vector field
+  fx.fillRandomly(-3.0, +3.0, 0, true);
+  fy.fillRandomly(-3.0, +3.0, 1, true);     // we need to use different seeds
+  fz.fillRandomly(-3.0, +3.0, 2, true);
+  //val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, u0, u1, v0, v1);
+  // very big value - maybe use smaller, non-integer coeffs to get more reasonable values
+
+  // Test Gauss' theorem:
+  double tol = 1.e-10;
+  x0 = 2, x1 = 4, y0 = 3, y1 = 5, z0 = 4, z1 = 6;
+  val1 = TriPoly::outfluxIntegral(fx, fy, fz, x0, x1, y0, y1, z0, z1);
+  TriPoly divergence = TriPoly::divergence(fx, fy, fz);
+  val2 = divergence.tripleIntegralXYZ(x0, x1, y0, y1, z0, z1);
+  ok &= rsIsCloseTo(val1, val2, tol);
+  // val2 seems to be more precise, which makes sense because the triple integral is a simpler
+  // computation than the flux integral
+
+  // Test Stokes' theorem:
+  using Vec3 = rsVector3D<double>;
+  //Vec3 P0(0,0,0), P1(1,0,0), P2(0,1,0);
+  Vec3 P0(1,2,3), P1(2,-3,-1), P2(-1,2,1);
+  std::vector<Vec3> path({P0, P1, P2, P0});
+  val1 = TriPoly::pathIntegral(fx, fy, fz, path);       // circulation around triangular loop
+  TriPoly cx, cy, cz;                                   // components of curl
+  TriPoly::curl(fx, fy, fz, cx, cy, cz);
+  val2 = TriPoly::fluxIntegral(cx, cy, cz, P0, P1, P2); // flux of curl through triangular patch
+  ok &= rsIsCloseTo(val1, val2, tol);
+
+  // ...more interesting is that the theorem holds for any surface that is bounded by the given 
+  // loop - it may totally bulge or balloon away from the boundary loop (here we used just a flat 
+  // (triangular) patch). We can test it by choosing a 4th point P4 and compute the 3 flux 
+  // integrals through: (P0, P4, P1), (P1, P4, P2), (P2, P4, P0):
+
+  Vec3 P4(3,1,-3);
+  //Vec3 P4(0,0,0);
+  //Vec3 P4 = (P0 + P1 + P2) / 3.0;
+  val3  = TriPoly::fluxIntegral(cx, cy, cz, P0, P4, P1);
+  val3 += TriPoly::fluxIntegral(cx, cy, cz, P1, P4, P2);
+  val3 += TriPoly::fluxIntegral(cx, cy, cz, P2, P4, P0);
+  // the value has a minus sign compared to val1, val2 - no matter how we choose P4 (well, tested 
+  // only with a few)
+
+  // reversing the orientations fixes this:
+  val3  = TriPoly::fluxIntegral(cx, cy, cz, P1, P4, P0);
+  val3 += TriPoly::fluxIntegral(cx, cy, cz, P2, P4, P1);
+  val3 += TriPoly::fluxIntegral(cx, cy, cz, P0, P4, P2);
+  // -> figure out why we need this
+
+  val3  = TriPoly::fluxIntegral(cx, cy, cz, P1, P0, P4);
+  val3 += TriPoly::fluxIntegral(cx, cy, cz, P2, P1, P4);
+  val3 += TriPoly::fluxIntegral(cx, cy, cz, P0, P2, P4);
+  // has also negative sign
+
+
+  // Test Green's integral formulas (https://en.wikipedia.org/wiki/Green%27s_identities or
+  // Bärwolff, pg 625):
+  TriPoly f(4,4,4), g(4,4,4), gx, gy, gz;
+  f.fillRandomly(-3.0, +3.0, 3, true);
+  g.fillRandomly(-3.0, +3.0, 4, true);
+  TriPoly::gradient(f, fx, fy, fz);
+  TriPoly::gradient(g, gx, gy, gz);
+
+  // First Green formula (Eq 8.31):
+  val1 = TriPoly::outfluxIntegral(g*fx, g*fy, g*fz, x0, x1, y0, y1, z0, z1);  // lhs
+  tmp = g*f.laplacian() + gx*fx + gy*fy + gz*fz;
+  val2 = tmp.tripleIntegralXYZ(x0, x1, y0, y1, z0, z1);  // rhs
+  double err = val2 - val1;
+  ok &= err == 0.0;
+  // val1 and val2 seem to be equal indeed, but the values are ridiculously large
+
+  // Second Green formula (Eq. 8.32):
+  val1 = TriPoly::outfluxIntegral(g*fx-f*gx, g*fy-f*gy, g*fz-f*gz, x0, x1, y0, y1, z0, z1);  // lhs
+  tmp = g*f.laplacian() - f*g.laplacian();
+  val2 = tmp.tripleIntegralXYZ(x0, x1, y0, y1, z0, z1);  // rhs
+  err = val2 - val1;
+  ok &= err == 0.0;
+
+  // todo: 
+  // -test 8.40 (page 629) for the 2D version of the 1st formula (but in the BiPoly unit test)
+  //  is there also a 2D version of the second formula?
+  // -implement and test the 1D version (also on page 625)..this has something to do with 
+  //  integration by parts - maybe implement that in rsPolynomial in the 1D case, maybe also the
+  //  substitution rule, if that makes sense
+
+  // Test scalar potential:
+  //tmp = getPotential(fx, fy, fz);
+  tmp = TriPoly::scalarPotential(fx, fy, fz);   // maybe rename to scalarPotential
+  gx = tmp.derivativeX(); ok &= fx == gx;
+  gy = tmp.derivativeY(); ok &= fy == gy;
+  gz = tmp.derivativeZ(); ok &= fz == gz;
+  ok &= tmp == f; // works only because f's (0,0,0) coeff happens to be zero - we should really 
+                  // compare only the coeffs excluding the constant term in general
+
+  // todo: implement functions hasScalarPotential, hasVectorPotential
+  // maybe implement the path-integral method to compute a (scalar) potential, too (Bärwollf pg
+  // 563)
+
+  // see
+  // https://tutorial.math.lamar.edu/classes/calcIII/conservativevectorfield.aspx
+
+
+  // for vector potentials, see:
+  // http://galileo.math.siu.edu/Courses/251/S12/vpot.pdf
+  // -integrate Fx, Fy with respect to z, call them Gx, Gy, negate Gy
+  // -...
+
+  using TP = TriPoly;
+
+  fx.fillRandomly(-3.0, +3.0, 3, true);
+  fy.fillRandomly(-3.0, +3.0, 3, true);
+  fz.fillRandomly(-3.0, +3.0, 3, true);
+  TP::curl(fx, fy, fz, cx, cy, cz);             // obtain curl field c using f as vector potential
+  TP::vectorPotential(cx, cy, cz, gx, gy, gz);  // construct vector potential g with same curl c
+  ok &= TP::isVectorPotential(gx, gy, gz, cx, cy, cz, tol);
+  divergence = TP::divergence(gx, gy, gz);
+
+  // test 2nd implementation with given divergence:
+  TP d(0,0,0);  // the zero polynomial
+  vectorPotential2(cx, cy, cz, d, gx, gy, gz);
+  //ok &= TP::isVectorPotential(gx, gy, gz, cx, cy, cz, tol);
+  divergence = TP::divergence(gx, gy, gz);
+  // divergence is indeed zero, but g seems not to be a vector potential anymore - some coeffs in 
+  // the computed curl match but others are totally wrong (it's not a precision issue) - i guess 
+  // our integration constants a(x,y), b(x,y) do in fact depend on z? maybe we an't simply set
+  // b_y = 0 as before anymore
+
+
+  fx = TP(1,1,1); fx.coeff(0,1,1) = 1;          // fx(x,y,z) = y*z
+  fy = TP(1,1,1); fy.coeff(1,0,1) = 1;          // fx(x,y,z) = x*z
+  fz = TP(1,1,1); fz.coeff(1,1,0) = 1;          // fz(x,y,z) = x*y
+  TP::vectorPotential(fx, fy, fz, gx, gy, gz);
+  ok &= TP::isVectorPotential(gx, gy, gz, fx, fy, fz, tol);
+  divergence = TP::divergence(gx, gy, gz);
+
+  // -maybe test, if we can add any conservative vector field to the vector potential with 
+  //  destroying its vector potential property
+  // -figure out meaningful ways to add such conservative vector fields to simplify certain 
+  //  calculations - this is called "fixing the gauge"
+
+
+
+
+
+  // constant flow in z-direction with unit speed, through a unit-square plane in (x,y) at z = 0:
+  double fluxX = 2, fluxY = 3, fluxZ = 4;
+
+  double dx = x1-x0, dy = y1-y0, dz = z1-z0;
+  double tgt;  // target
+  fx = TriPoly(0, 0, 0, { fluxX });
+  fy = TriPoly(0, 0, 0, { fluxY });
+  fz = TriPoly(0, 0, 0, { fluxZ });
+
+  // We imagine, x goes rightward, y goes forward, z goes upward
+
+  // top and bottom plane (z constant):
+  tgt  = fluxZ*dx*dy;
+  px   = BiPoly(1, 1, { x0, 0, dx, 0 });
+  py   = BiPoly(1, 1, { y0, dy, 0, 0 });
+  pz   = BiPoly(0, 0, { z0           });
+  val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, 0., 1., 0., 1.);
+  ok &= val1 == tgt;
+  pz = BiPoly(0, 0, { z1             });
+  val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, 0., 1., 0., 1.);
+  ok &= val1 == tgt;
+
+  // front and back plane (y constant):
+  tgt  = fluxY*dx*dz;
+  px   = BiPoly(1, 1, { x0, 0,  dx, 0 });
+  py   = BiPoly(0, 0, { y0            });
+  pz   = BiPoly(1, 1, { z1, -dz, 0, 0 }); // z takes the role of y, direction reversed, see below
+  val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, 0., 1., 0., 1.);
+  ok  &= val1 == tgt; 
+  py = BiPoly(0, 0, { y1             });
+  val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, 0., 1., 0., 1.);
+  ok &= val1 == tgt; 
+  // We can use:
+  //   px = BiPoly(1, 1, { x1, -dx, 0, 0 });
+  //   py = BiPoly(0, 0, { y0            });
+  //   pz = BiPoly(1, 1, { z0, 0,  dz, 0 });
+  // or 
+  //   px = BiPoly(1, 1, { x0, dx,  0, 0 });
+  //   py = BiPoly(0, 0, { y0            });
+  //   pz = BiPoly(1, 1, { z1, 0, -dz, 0 });
+  // as parametrization, but not:
+  //   px = BiPoly(1, 1, { x0, 0, dx, 0 });
+  //   py = BiPoly(0, 0, { y0           });
+  //   pz = BiPoly(1, 1, { z0, dz, 0, 0 }); 
+  // because then the result will have the wrong sign. This is because when i,j,k are the unit 
+  // vectors in the x,y,z directions, then we have: i x j = k, i x k = -j, j x k = i (x denoting 
+  // the cross product).
+
+  // left and right plane (x constant):
+  tgt  = fluxX*dy*dz;
+  px   = BiPoly(0, 0, { x0           });  // x is constant
+  py   = BiPoly(1, 1, { y0, 0, dy, 0 });  // y takes the role of x
+  pz   = BiPoly(1, 1, { z0, dz, 0, 0 });  // z takes the role of y
+  val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, 0., 1., 0., 1.);
+  ok  &= val1 == tgt; 
+  px   = BiPoly(0, 0, { x1           });
+  val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, 0., 1., 0., 1.);
+  ok  &= val1 == tgt; 
+
+  // compute outflux for simple linear fields like fx = a + b*x, fy = 0, fz = 0
+  fx = TriPoly(1, 1, 1);
+  fx.coeff(1, 0, 0) = fluxX;
+  fy = fz = TriPoly(0,0,0);
+  tgt  = fluxX*dy*dz;
+  px   = BiPoly(0, 0, { x0           });
+  py   = BiPoly(1, 1, { y0, 0, dy, 0 });
+  pz   = BiPoly(1, 1, { z0, dz, 0, 0 });
+  val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, 0., 1., 0., 1.);
+  val2 = tgt*x0;
+  ok  &= val1 == val2; 
+  px   = BiPoly(0, 0, { x1           });
+  val1 = TriPoly::fluxIntegral(fx, fy, fz, px, py, pz, 0., 1., 0., 1.);
+  val2 = tgt*x1;
+  ok  &= val1 == val2; 
+  val1 = TriPoly::outfluxIntegral(fx, fy, fz, x0, x1, y0, y1, z0, z1);
+  val2 = tgt*(x1-x0);
+  ok  &= val1 == val2;
+  divergence = TriPoly::divergence(fx, fy, fz);
+  val3 = divergence.tripleIntegralXYZ(x0, x1, y0, y1, z0, z1);
+  ok  &= val1 == val3;
+
+  fz = TriPoly(1, 1, 1);
+  fz.coeff(0, 0, 1) = fluxZ;
+  fx = fy = TriPoly(0,0,0);
+  val1 = TriPoly::outfluxIntegral(fx, fy, fz, x0, x1, y0, y1, z0, z1);
+  tgt  = fluxZ*dx*dy;
+  val2 = tgt*(z1-z0);
+  ok  &= val1 == val2; 
+  divergence = TriPoly::divergence(fx, fy, fz);
+  val3 = divergence.tripleIntegralXYZ(x0, x1, y0, y1, z0, z1);
+  ok  &= val1 == val3;
+
+  fy = TriPoly(1, 1, 1);
+  fy.coeff(0, 1, 0) = fluxY;
+  fx = fz = TriPoly(0,0,0);
+  val1 = TriPoly::outfluxIntegral(fx, fy, fz, x0, x1, y0, y1, z0, z1);
+  tgt  = fluxY*dx*dz;
+  val2 = tgt*(y1-y0);
+  ok  &= val1 == val2; 
+  divergence = TriPoly::divergence(fx, fy, fz);
+  val3 = divergence.tripleIntegralXYZ(x0, x1, y0, y1, z0, z1);
+  ok  &= val1 == val3;
+
+  // Compute path integral of vector field:
+  Poly xt({1,2,3,4});
+  Poly yt({2,3,4,5});
+  Poly zt({3,4,5,6});
+  val1 = TriPoly::pathIntegral(fx, fy, fz, xt, yt, zt, 0.0, 1.0); // 288
+
+  rsAssert(ok);
+  return ok;
+}
+
+
+
+template<class T>
+bool rsIsCloseTo(const RAPT::rsPolynomial<T>& p, const RAPT::rsPolynomial<T>& q, T tol)
+{
+  // Compare coeffs up to the highest one of lower degree polynomial:
+  int degP = p.getDegree();
+  int degQ = q.getDegree();
+  for(int i = 0; i <= rsMin(degP, degQ); i++)
+    if( rsAbs(p.getCoeff(i)-q.getCoeff(i)) > tol )
+      return false;
+  if(degP == degQ)
+    return true;    // if degrees match, we are done here
+
+  // If they have different degrees, check, if the higher order coeffs of the higher degree 
+  // polynomial are close to zero:
+  if(degP > degQ) { 
+    for(int i = degQ+1; i <= degP; i++)
+      if( rsAbs(p.getCoeff(i)) > tol )
+        return false; }
+  else {  // degQ > degP
+    for(int i = degP+1; i <= degQ; i++)
+      if( rsAbs(q.getCoeff(i)) > tol )
+        return false; }
+  return true;
+}
+// move to TestTools
+
+bool testPiecewisePolynomial1()
+{
+  bool r = true;
+
+  using Poly      = RAPT::rsPolynomial<double>;
+  using PiecePoly = rsPiecewisePolynomial<double>;
+  Poly p({ 2,-3,5,-7 }); double pL = -1, pU = 2; // p(x) = 2 - 3*x + 5*x^2 - 7*x^3  in -1..2
+  Poly q({ 3,-4,6    }); double qL =  3, qU = 4; // q(x) = 3 - 4*x + 6*x^2          in  3..4
+
+  // Test convolving two polynomial pieces. This gives 3 segments.
+  // Sage:
+  // p  = piecewise([((-1,2), 2 - 3*x + 5*x^2 - 7*x^3)])
+  // q  = piecewise([(( 3,4), 3 - 4*x + 6*x^2)])
+  // pq = p.convolution(q)
+  // pq
+  // #plot([p,q,pq],xmin=-1,xmax=6)
+  //
+  // gives:
+  // pq = 
+  // -7/10*x^6 + 12/5*x^5 - 101/12*x^4 + 326*x^3 - 2271*x^2 + 92231/15*x - 28594/5 on (2, 3]
+  // -441*x^3 + 5012*x^2 - 288133/15*x + 498143/20 on (3, 5] 
+  // 7/10*x^6 - 12/5*x^5 + 101/12*x^4 - 767*x^3 + 14449/2*x^2 - 124586/5*x + 150942/5 on (5, 6]
+
+  // Define target pieces:
+  double tol = 1.e-11; // we need a rather high tolerance because the absolute values are quite 
+                       // large -> maybe use a relative tolerance
+  Poly tL({-28594./5, 92231./15, -2271, 326, -101./12, 12./5, -7./10});
+  Poly tM({ 498143./20,-288133./15,5012,-441});
+  Poly tR({150942./5,-124586./5,14449./2,-767.,101./12,-12./5,7./10});
+
+  // Compute the pieces and domain boundaries and compare results to their targets:
+  Poly rL, rM, rR;            // left, middle, right section of result
+  double rLL, rLU, rRL, rRU;  // lower and upper limits of the sections
+  PiecePoly::convolvePieces(p, pL, pU, q, qL, qU, rL, rLL, rLU, rM, rR, rRL, rRU);
+  r &= rsIsCloseTo(rL, tL, tol);
+  r &= rsIsCloseTo(rM, tM, tol);
+  r &= rsIsCloseTo(rR, tR, tol);
+  r &= rLL == 2; r &= rLU == 3;
+  r &= rRL == 5; r &= rRU == 6;
+
+  // Test role reversal of p and q:
+  PiecePoly::convolvePieces(q, qL, qU, p, pL, pU, rL, rLL, rLU, rM, rR, rRL, rRU);
+  r &= rsIsCloseTo(rL, tL, tol);
+  r &= rsIsCloseTo(rM, tM, tol);
+  r &= rsIsCloseTo(rR, tR, tol);
+  r &= rLL == 2; r &= rLU == 3;
+  r &= rRL == 5; r &= rRU == 6;
+
+  // Now, let's swap the domains:
+  // p  = piecewise([(( 3,4), 2 - 3*x + 5*x^2 - 7*x^3)])
+  // q  = piecewise([((-1,2), 3 - 4*x + 6*x^2)])
+  // pq = p.convolution(q)
+  // pq
+  //
+  // gives:
+  // -7/10*x^6 + 12/5*x^5 - 101/12*x^4 - 38*x^3 + 561*x^2 - 53089/15*x + 26206/5 on (2, 3], 
+  // -3037/2*x^2 + 178022/15*x - 478007/20 on (3, 5], 
+  // 7/10*x^6 - 12/5*x^5 + 101/12*x^4 - 109*x^3 - 3319/2*x^2 + 72444/5*x - 142758/5 on (5, 6]
+  p  = Poly({ 2,-3,5,-7 }); pL =  3, pU = 4; // p(x) = 2 - 3*x + 5*x^2 - 7*x^3  in  3..4
+  q  = Poly({ 3,-4,6    }); qL = -1, qU = 2; // q(x) = 3 - 4*x + 6*x^2          in -1..2
+  tL = Poly({26206./5, -53089./15, 561, -38, -101./12, 12./5, -7./10});
+  tM = Poly({-478007./20, 178022./15, -3037./2 });
+  tR = Poly({-142758./5, 72444./5, -3319./2, -109, 101./12, -12./5, 7./10});
+
+  PiecePoly::convolvePieces(p, pL, pU, q, qL, qU, rL, rLL, rLU, rM, rR, rRL, rRU);
+  r &= rsIsCloseTo(rL, tL, tol);
+  r &= rsIsCloseTo(rM, tM, tol);
+  r &= rsIsCloseTo(rR, tR, tol);
+  r &= rLL == 2; r &= rLU == 3;
+  r &= rRL == 5; r &= rRU == 6;
+
+  PiecePoly::convolvePieces(q, qL, qU, p, pL, pU, rL, rLL, rLU, rM, rR, rRL, rRU);
+  r &= rsIsCloseTo(rL, tL, tol);
+  r &= rsIsCloseTo(rM, tM, tol);
+  r &= rsIsCloseTo(rR, tR, tol);
+  r &= rLL == 2; r &= rLU == 3;
+  r &= rRL == 5; r &= rRU == 6;
+
+  // ToDo: 
+  // -make tests with all possible combinations of p having higher and lower degree than q and
+  //  longer, shorter, equal domain
+  // -figure out, why the nominal degrees of the results are higher than the actual ones (higher
+  //  order coeffs are zero) - i suppose, it's because the integral with respect to y could 
+  //  potentially produce a higher degree output, but because the lower right coeffs in matrix
+  //  of the bivariate polynomial are zero, the final result coeffs come out as zero too
+  //  ...maybe the function should cut off trailing zeros
+  // -the middle section seems to have the degree of the polynomial with the longer domain, even if
+  //  that's the one with the lower degree...seems like a high-degree polynomial gets its wiggles
+  //  smoothed out such that only the low degree remains in the smoothed polynomial
+  // -the outer sections seem to have a degree that is the product of the input degrees? 
+  //  ..nope - it's their sum plus one
+  // -figure out the nominal and actual degrees of the output segments as function of the degrees
+  //  (and maybe lengths of domains?) of the input segments
+  // -produce B-Spline polynomials and/or Irvin-Hall distribution
+
+  return r;
+}
+
+bool testPiecewisePolynomial2()
+{
+  bool r = true;
+
+  using Poly      = RAPT::rsPolynomial<double>;
+  using PiecePoly = rsPiecewisePolynomial<double>;
+
+  Poly one({ 1.0 });  // polynomial that is constantly 1
+  Poly two({ 2.0 });  // polynomial that is constantly 2
+
+  PiecePoly p;
+  p.addPiece(Poly({1,-1      }), 0, 1);  // p(x) = 1-x     in x = 0..1
+  p.addPiece(Poly({3, 0,-1   }), 1, 2);  // p(x) = 3-x^2   in x = 1..2
+  p.addPiece(Poly({1, 0, 0,-1}), 2, 3);  // p(x) = 1-x^3   in x = 2..3
+
+  // Test, if the left domain boundary is included and the right one is excluded in evaluation:
+  double x, y;
+  x = -0.1; y = p(x); r &= y == 0;
+  x =  0.0; y = p(x); r &= y == 1-x;
+  x =  0.1; y = p(x); r &= y == 1-x;
+  x =  0.9; y = p(x); r &= y == 1-x;
+  x =  1.0; y = p(x); r &= y == 3-x*x;
+  x =  1.1; y = p(x); r &= y == 3-x*x;
+  x =  1.9; y = p(x); r &= y == 3-x*x;
+  x =  2.0; y = p(x); r &= y == 1-x*x*x;
+  x =  2.1; y = p(x); r &= y == 1-x*x*x;
+  x =  2.9; y = p(x); r &= y == 1-x*x*x;
+  x =  3.0; y = p(x); r &= y == 0;
+
+  p.addPiece(Poly({0, 1, 0}), 1, 2); // middle segment should now be  p(x) = 3 + x - x^2
+  x = 1.5; y = p(x); r &= y == 3 + x - x*x;
+
+  // initialization with 6 constant segments that is repeatedly used for the following tests:
+  auto init6 = [&]() 
+  {  
+    p.clear();
+    for(int i = 0; i < 6; i++)
+      p.addPiece(one, double(i), i+1.0);
+  };
+
+  // left match, right mismatch:
+  init6(); p.addPiece(two, 2.0, 4.5); 
+  r &= p(1.9) == 1 && p(2.1) == 3 && p(4.4) == 3 && p(4.6) == 1;
+  //plot(p);
+
+  // left match, right beyond:
+  init6(); p.addPiece(two, 2.0, 6.5); 
+  r &= p(1.9) == 1 && p(2.1) == 3 && p(5.9) == 3 && p(6.1) == 2 && p(6.4) == 2 && p(6.6) == 0;
+  //plot(p);
+
+  // left beyond, right match:
+  init6(); p.addPiece(two, -1.0, 3.0);
+  r &= p(-1.1) == 0 && p(-0.9) == 2 && p(-0.1) == 2 && p(0.1) == 3 && p(2.9) == 3 && p(3.1) == 1;
+  //plot(p);
+
+  // left mismatch, right match
+  init6(); p.addPiece(two, 2.5, 5.0);
+  r &= p(2.4) == 1 && p(2.6) == 3 && p(4.9) == 3 && p(5.1) == 1;
+  //plot(p);
+
+  init6(); p.addPiece(two, 3.25, 3.75);
+  r &= p(3.2) == 1 && p(3.3) == 3 && p(3.7) == 3 && p(3.8) == 1;
+  //plot(p);
+
+  // left mismatch, right mismatch
+  init6(); p.addPiece(two, 2.5, 4.5);
+  r &= p(2.4) == 1 && p(2.6) == 3 && p(4.4) == 3 && p(4.6) == 1;
+  //plot(p);
+
+  p = p + p;
+  r &= p(2.4) == 2 && p(2.6) == 6 && p(4.4) == 6 && p(4.6) == 2;
+  //plot(p);
+
+  p = p - p;
+  r &= p(2.4) == 0 && p(2.6) == 0 && p(4.4) == 0 && p(4.6) == 0;
+
+  // todo: 
+  // -implement and test multiplication by a scalar (left and right)
+  // -implement another unit test that adds polynomials that arise from randomly sampling noise at 
+  //  random x-values and interpolating them...or maybe just use totally random polynomials
+
+  return r;
+}
+
+bool testPiecewisePolynomial3()
+{
+  bool r = true;
+
+  int N1 = 50;  // number datapoints in polynomial 1
+  int N2 = 50;  // number datapoints in polynomial 2
+
+  using Poly      = RAPT::rsPolynomial<double>;
+  using PiecePoly = rsPiecewisePolynomial<double>;
+
+  rsNoiseGenerator<double> ng;
+  ng.setRange(0, 1);
+  PiecePoly p1, p2;
+
+  auto getRandomPoly = [&](int deg) -> Poly 
+  {
+    Poly p(deg);
+    double* c = p.getCoeffPointer();
+    for(int i = 0; i <= deg; i++)
+      c[i] = ng.getSample();
+    return p;
+  };
+
+  auto getRandomPiecePoly = [&](int numPieces) -> PiecePoly
+  {
+    PiecePoly pp;
+    double xL = ng.getSample();
+    for(int i = 0; i < numPieces; i++)
+    {
+      double xR = xL + ng.getSample();
+      int deg = (int)ceil((8.0 * ng.getSample()));
+      Poly p = getRandomPoly(deg);
+      p.shiftX((xL+xR)/2);
+      pp.addPiece(p, xL, xR);
+      xL = xR;
+    }
+    return pp;
+  };
+
+  p1 = getRandomPiecePoly(N1);
+  p2 = getRandomPiecePoly(N2);
+  //plot(p1);
+  //plot(p2);
+  PiecePoly sum = p1 + p2;
+  //plot(sum); 
+
+
+  // evaluate at random positions
+  double xMin = sum.getDomainMinimum();
+  double xMax = sum.getDomainMaximum();
+  double tol  = 1.e-3;
+  double dMax = 0;
+  for(int i = 0; i < 100; i++)
+  {
+    double x = xMin + (xMax-xMin) * ng.getSample();
+    double y = sum.evaluate(x);
+    double t = p1.evaluate(x) + p2.evaluate(x);
+    dMax = rsMax(dMax, rsAbs(y-t));
+  }
+  r &= dMax <= tol;
+  // dMax is quite large: 0.000258... that's much more than what we would expect from rounding 
+  // errors - or is it? should we expect such large errors? maybe it's because the error in the 
+  // coefficient gets blown up by x^N? we have polynomials of degrees up to 9 and x goes up to 
+  // 25 ...oh - and we get really big coeffs at higher x - maybe it would be numerically much 
+  // better to store coefficients for a polynomial in 0..1 and transform the input, i.e. work with
+  // normalized x values internally - but then, we can not just simply add coefficients anymore 
+  // when we add a piece, because the coeffs are incompatible - each set of coeffs requires a 
+  // different affine transform of the input - but actually, this class is not really meant for
+  // interpolating random datapoints anyway. it's more meant for math stuff - in particular, doing
+  // computations with the Irwin-Hall distribution to shape the properties of noise
+
+
+  return r;
+}
+
+bool testPiecewisePolynomial()
+{
+  bool r = true;
+  r &= testPiecewisePolynomial1();
+  r &= testPiecewisePolynomial2();
+  r &= testPiecewisePolynomial3();
+  //r &= testPiecewisePolynomial3();
+  return r;
+}
+
 bool testPolynomial()
 {
   std::string reportString = "Polynomial"; // dummy -> remove
@@ -1440,6 +2504,11 @@ bool testPolynomial()
 
   testResult &= testRationalFunction(reportString);
 
+
+  testResult &= testBivariatePolynomial();
+  testResult &= testBivariatePolynomial2();
+  testResult &= testTrivariatePolynomial(); // this takes long
+  testResult &= testPiecewisePolynomial();
 
   return testResult;
 }

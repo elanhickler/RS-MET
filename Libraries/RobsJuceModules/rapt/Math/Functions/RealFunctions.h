@@ -56,6 +56,9 @@ static double rsFactorials[rsNumFactorials] =
 // errors in both cases
 // the long double variant doesn't compile anymore when we instantiate rsPolynomial with 
 // std::complex<double>, so it has been changed to double
+// ToDo: 
+// -check, if the large values still make sense or if we get overflow problems
+// -maybe move to some Constants.h file
 
 /** A table of reciprocal values of the factorial of some integer number n, that is: 1/n!, where
 n should be between 0...31 (inclusive) - the values are tabulated and any value outside the range
@@ -153,7 +156,8 @@ template<class T>
 T rsCsch(T x);
 
 /** Converts an angle in degrees into radiant. */
-RS_INLINE double rsDegreeToRadiant(double degrees);
+template<class T>
+RS_INLINE T rsDegreeToRadiant(T degrees);
 
 /** Distance of x to a multiple of period p */
 template<class T> 
@@ -469,9 +473,10 @@ T rsCsch(T x)
   return (2*c)/(c*c-1);
 }
 
-RS_INLINE double rsDegreeToRadiant(double degrees)
+template<class T>
+RS_INLINE T rsDegreeToRadiant(T degrees)
 {
-  return (PI / 180.0)*degrees;
+  return T(PI/180.0)*degrees;
 }
 
 // distance of x to a multiple of period p
