@@ -605,11 +605,166 @@ void linearIndependence()
 
 
 
+void orthogonalizedPowerIteration()
+{
+  // Experiments with an algorithm that i came up with that is a simple extension of the power 
+  // iteration method to compute the largest eigenvalue and it's corresponding eigenvector. The 
+  // algo is extended to find more (potentially all) eigenvalues and -vectors by forcing the 
+  // iterates to be orthogonal to the subspace spanned by all the already found eigenvectors. It 
+  // does so by doing a Gram-Schmidt like orthogonalization step after the multiplication of the
+  // iterate by the matrix. It turns out (as far as i can tell, so far), that the resulting algo 
+  // is indeed able to find all eigenvalues but the eigenvectors can only be found if they happen
+  // to be orthogonal (which is the case for eigenvectors corresponding to distinct eigenvalues of
+  // a symmetric matrix). For the time being, i would suggest to call the algorithm "orthogonalized
+  // power iteration" (OPI).
+
+  using Real = double;
+  using Mat  = rsMatrix<Real>;
+  using Vec  = std::vector<Real>;
+  using ILA  = rsIterativeLinearAlgebra;
+  using AT   = rsArrayTools;
+
+  // Create 2x2 matrix with eigenvalues 3,2 and (orthogonal) eigenvectors (6,8),(-8,6):
+  int N = 2;                      // dimensionality
+  Vec s({3,    2  });             // eigenvalues* (distinct, positive real)
+  Vec v({6,8, -8,6});             // eigenvectors (orthogonal, both have norm 100)
+  Mat A = fromEigenSystem(s, v);  // A = (2.36, 0.48,  0.48, 2.64) (symmetric)
+  // (*) I use s for the eigenvalues to indicate that they are scalars ("eigenscalars")
+
+  // Output variables for algo:
+  Vec wrk(N), t(N), w(N*N);       // wrk: workspace, t: recovered eigenvalues, w: orthovectors*
+  int its;                        // number of iteratiosn taken by the algo
+  bool ok = true;
+  // (*) "orthovector" is a term i just made up myself to call the orthogonalized eigenvectors that
+  // the algo produces.
+
+  // Retrieve eigensystem:
+  AT::fillWithRandomValues(&w[0], N*N, -1.0, +1.0, 0);     // initial guess
+  its = ILA::eigenspace(A, &t[0], &w[0], 1.e-13, &wrk[0]); // its = 81
+  ok  = checkEigensystem(t, w, s, v, 1.e-12);              // yep, works!
+
+  // Now try the same thing with eigenvectors (6,8),(8,6). These have still both norm 100 but are
+  // not orthogonal anymore:
+  v = Vec({6,8, 8,6});                                     // not orthogonal anymore
+  A    = fromEigenSystem(s, v);                            // A is now antisymmetric
+  AT::fillWithRandomValues(&w[0], N*N, -1.0, +1.0, 0);     // initial guess
+  its = ILA::eigenspace(A, &t[0], &w[0], 1.e-13, &wrk[0]); // its = 75
+  ok  = rsIsPermutation(s, t, 1.e-12);                     // eigenvalues are correct
+  ok  = checkEigensystem(t, w, s, v, 1.e-12);              // eigenvectors are wrong
+
+  // Test if the found vectors are orthonormal (they should be):
+  Mat W = rsToMatrixColumnWise(w, N, N);
+  ok = areColumnsOrthogonal( W, 1.e-12);                   // yes
+  ok = areColumnsOrthonormal(W, 1.e-12);                   // yes
+
+  // Test if the found vectors are compatible with the Gram-Schmidt orthogonalized set of the 
+  // actual, true eigenvectors:
+  Mat V   = rsToMatrixColumnWise(v, N, N);
+  Mat V_o = V; orthonormalizeColumns1(V_o);       // V_o is (Gram-Schmidt) orthogonalized V
+  Mat D   = W - V_o;
+  // D is the zero matrix, so the computed vectors are indeed equal to the Gram-Schmidt 
+  // orthogonalized set of the original eigenvectors. I think, in general, we would expect them to
+  // equal to but only compatible with them, i.e. they may have different signs. (...something to
+  // figure out...)
+
+  // Now try to recover the orginal eigenvector v2 from w1,w2 by undoing the Gram-schmidt process
+  // ...but how can this be done? Can it be done at all?
+  Vec v1(N); V.copyColumn(0, &v1[0]); // todo: implement convenience function: v1 = V.getColumn(0)
+  Vec v2(N); V.copyColumn(1, &v1[0]);
+  Vec w1(N); W.copyColumn(0, &w1[0]);
+  Vec w2(N); W.copyColumn(1, &w2[0]);
+  Vec Aw2 = A*w2;
+  Vec u2p = w1 + Aw2;  // nah - does not equal v2
+  Vec u2m = w1 - Aw2;  // ditto
+  // The Gram-Schmidt process applied to v1,v2 does (verify!):
+  //
+  //   v1_o = v1 / |v1|
+  //
+  //            (v2 - <v1_o, v2> * v1_o)
+  //   v2_o = ----------------------------
+  //           |(v2 - <v1_o, v2> * v1_o)|
+  //
+  // Can this be undone? The normalization steps obviously can't be undone because the length 
+  // information is indeed lost in such a step. But we are not interested in reconstructing the 
+  // length information anyway. Only the direction information is relevant. Can we hope to 
+  // reconstruct from v1_o, v2_o a vector v2_n that is a normalized version of v2 not necessarily
+  // orthogonal to v1_o but instead pointing in the same direction as v2 originally did? Maybe not
+  // without additional information. But we do have additional information: the matrix A, its
+  // eigenvalues s1,s2 and we know that v1 and v1_o are eigenvectors to s1 and we know that
+  // v2_o is the perpendicular part of v2 with respect to v1 (or v1_o). Maybe writing:
+  //   v2_n = par(v2_n, {v1}) + perp(v2_n, {v1})
+  // could help? Here, par and perp denote the parallel and perpendicular part of a vector with 
+  // respect to a set of vectors (here, a 1 element set). The term perp(v2_n, {v1}) has the same 
+  // direction as v2_o (but possibly different length?)
+  // See:
+  // https://www.physicsforums.com/threads/matrix-which-reverses-gram-schmidt-linear-algebra.981879/
+  // https://arxiv.org/ftp/arxiv/papers/1607/1607.04759.pdf - this apaper discusses an inversion
+  // algo for Gram-Schmidt, but that makes use of an additional matrix r(M,N) that is computed 
+  // during the forward orthogonalization along with the orthogonalized set of vectors. We don't
+  // have such a matrix available here. Maybe define the (unknwon) denominator as:
+  //   k2 := |(v2 - <v1_o, v2> * v1_o)|. 
+  // Then we may write 
+  //   v2_o*k2 = v2 - <v1_o, v2> * v1_o
+  // here v2_o,v1_o are the knwons and k2,v2 are the unknowns.
+  // I think, in this special case here, we may be able to reconstruct the eigenvector by flipping
+  // the sign of x or y. Try it! but this may work only when A is antisymmetric? ...maybe if it 
+  // works, the algo can be applied to symmetric and antisymmetic parts (A_s, A_a) separately? But 
+  // that would only help, if we could find the eigenvectors of A from those of A_s, A_a
 
 
+
+  int dummy = 0;
+
+
+  // Now try it with a 3x3 matrix with orthogonal eigenvectors (6,8,0),(-8,6,0),(0,0,10):
+  // ...
+
+  // Observations:
+  // -For the symmetric 2x2 matrix A = (2.36, 0.48,  0.48, 2.64) with eigenvalues 3,2 and 
+  //  orthogonal eigenvectors (6,8),(-8,6), the algorithm can indeed recover both eigenpairs from
+  //  the matrix A. The algo takes 81 iterations.
+  // -When we use the non-orthogonal eigenvectors (6,8),(8,6), the matrix A becomes antisymmetric.
+  //  The algo will still produce the correct eigenvalues, but the returned vectors are not the
+  //  eigenvectors. The algo takes 75 iterations - that's a bit less than before.
+
+  // Conclusion (preliminary):
+  // -I think, the set of vectors that the algorithm produces is forced to be orthogonal and 
+  //  therefore it can match the actual eigenvectors only when they are orthogonal themselves.
+  // -I think in any step, (i.e. for any n), the set of the n already found vectors spans the same
+  //  space as the first n eigenvectors. Indeed, i think the set of vectors is the Gram-Schmidt
+  //  orthogonalized set of the first n eigenvectors.
+  // -Maybe the algorithm could at least be useful for symmetric matrices, because their 
+  //  eigenvectors are indeed orthogonal. Oh - no - that holds only for eigenvectors corresponding 
+  //  to distinct eigenvalues:
+  //  https://math.stackexchange.com/questions/82467/eigenvectors-of-real-symmetric-matrices-are-orthogonal
+
+  // ToDo:
+  // -Try to apply Gram-Schmidt othogonalization to the actual, true eigenvectors and see if the
+  //  result matches the output of the algo.
+  // -Try to reconstruct the actual eigenvectors from the returned orthonormal set by a 
+  //  postprocessing step. Maybe in the 2x2 case try w2' = w1 + A*w2 or w2' = w1 - A*w2 where
+  //  w2' is supposed to be the reconstructed eigenvector v2 and w1 is the first (found) 
+  //  eigenvector. I think the computed w2 is perp(v2; w1), i.e. the perpendicular componenent of
+  //  the actual eigenvector v2 with respect to the 1st eigenvector w1 (which itself is compatible
+  //  with v1, i.e. equals v1 up to scaling)
+  // -If this doesn't work out, we may use the known eigenvalues s_i to compute the corresponding 
+  //  eigenvectors v_i in a 2nd step, one at a time, by solving the linear system 
+  //  (A - s_i*I) * v_i = 0. If this system is also to be solved iteratively, maybe it makes sense
+  //  to use the computed "orthovector" as initial guess? Maybe it would make sense to have a 
+  //  function shiftedProduct that can be used instead of the regular call to product in the 
+  //  solvers. shiftedProduct(const rsMatrix<T>& A, const T& s, const T* x, T* y) should work
+  //  like product(const rsMatrix<T>& A, const T* x, T* y) but instead use the shifted matrix
+  //  (not yet sure, if the shift should be applied with positive or negative sign). 
+  //  To do this, we should first move the solvers from rsSparseMatrix into 
+  //  rsIterativeLinearAlgebra
+  // -Rayleigh iteration may also be a candidate to find the eigenvectors
+}
 
 void eigenstuff()
 {
+  orthogonalizedPowerIteration();
+
+
   // create a matrix and find its eigenvalues and eigenvectors
 
   using Matrix  = RAPT::rsMatrix<double>;

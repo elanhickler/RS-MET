@@ -139,6 +139,7 @@ template void rsArrayTools::reverse(const double* x, double* y, int length);
 template void rsArrayTools::rightShift(double *buffer, int length, int numPlaces);
 template void rsArrayTools::sequenceSqrt(const double *y, int yLength, double *x);
 template void rsArrayTools::shift(double *buffer, int length, int numPlaces);
+template double rsArrayTools::sumOfAbsoluteValues(const double *x, const int N);
 template void rsArrayTools::transposeSquareArray(double **in, double **out, int size);
 template void rsArrayTools::unwrap(double* a, int N, double p);
 
@@ -279,8 +280,12 @@ template void RAPT::rsLinearAlgebraNew::makeTriangularNoPivot(
   rsMatrixView<RAPT::rsRationalFunction<double>>& B);
   */
 
+
+
 template RAPT::rsMatrix<double> RAPT::rsLinearAlgebraNew::inverse(
   const RAPT::rsMatrixView<double>& A);
+
+template double RAPT::rsLinearAlgebraNew::determinant(const RAPT::rsMatrixView<double>& A);
 
 template int RAPT::rsLinearAlgebraNew::makeDiagonal(
   RAPT::rsMatrixView<double>& A, RAPT::rsMatrixView<double>& B);

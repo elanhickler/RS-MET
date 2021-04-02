@@ -1,6 +1,9 @@
 
 using namespace RAPT;  // get rid
 
+//=================================================================================================
+// LAPACK based solvers:
+
 bool testBandDiagonalSolver()
 {
   //std::string testName = "BandDiagonalSolver";
@@ -65,11 +68,14 @@ bool testBandDiagonalSolver()
   return testResult;
 }
 
+//=================================================================================================
+// Old 2D array based solvers:
+
 bool testMatrix2x2()
 {
   std::string testName = "Matrix2x2";
   bool testResult = true;
-  typedef rsLinearAlgebra LA;
+  typedef rsLinearAlgebra LA;  // todo: move the code to rsLinearAlgebraNew
 
 
   // Test compuatation of eigenvalues and eigenvectors:
@@ -342,323 +348,7 @@ bool testTridiagonalSystem()
   return testResult;
 }
 
-
-bool testSquareMatrixTranspose()
-{
-  std::string testName = "SquareMatrixTranspose";
-  bool testResult = true;
-
-  // create test-matrix:
-  double A[5][5] = {{ 1,  2,  3,  4,  5},
-                    { 6,  7,  8,  9, 10},
-                    {11, 12, 13, 14, 15},
-                    {16, 17, 18, 19, 20},
-                    {21, 22, 23, 24, 25}};
-
-  // create transposed test-matrix:
-  double T[5][5] = {{ 1,  6, 11, 16, 21},
-                    { 2,  7, 12, 17, 22},
-                    { 3,  8, 13, 18, 23},
-                    { 4,  9, 14, 19, 24},
-                    { 5, 10, 15, 20, 25}};
-
-  // test (in-place) transposition of matrix A:
-  double *pA[5];
-  for(int i = 0; i < 5; i++)
-    pA[i] = &A[i][0];
-
-
-  rsArrayTools::transposeSquareArray(pA, 5);
-
-  for(int i = 0; i < 5; i++)
-  {
-    for(int j = 0; j < 5; j++)
-      testResult &= A[i][j] == T[i][j];
-  }
-
-  return testResult;
-}
-
-
-
 // todo: Gram-Schmidt orthogonalization of a set of basis vectors
-
-
-bool testMatrixVectorMultiply()
-{
-  std::string testName = "MatrixVectorMultiply";
-  bool testResult = true;
-
-  // create test-matrix and vector, allocate result vector:
-  double A[3][3] = {{1, 2, 3},
-                    {4, 5, 6},
-                    {7, 8, 9}};
-  double *pA[3];
-  for(int i = 0; i < 3; i++)
-    pA[i] = &A[i][0];
-  double x[3] =  {1, 2, 3};
-  double y[3];
-
-  // 3x3-matrix times 3-vector:
-  // |1 2 3| * |1| = |14|
-  // |4 5 6|   |2|   |32|
-  // |7 8 9|   |3|   |50|
-  rsArrayTools::fillWithValue(y, 3, -1.0);
-  rsMatrixTools::matrixVectorMultiply(pA, x, y, 3, 3);
-  testResult &= y[0] == 14;
-  testResult &= y[1] == 32;
-  testResult &= y[2] == 50;
-
-  // transposed 3x3-matrix times 3-vector:
-  // |1 2 3|^T * |1| = |1 4 7| * |1| = |30|
-  // |4 5 6|     |2|   |2 5 8|   |2|   |36|
-  // |7 8 9|     |3|   |3 6 9|   |3|   |42|
-  rsArrayTools::fillWithValue(y, 3, -1.0);
-  rsMatrixTools::transposedMatrixVectorMultiply(pA, x, y, 3, 3);
-  testResult &= y[0] == 30;
-  testResult &= y[1] == 36;
-  testResult &= y[2] == 42;
-
-  // 3x2-matrix times 2-vector:
-  // |1 2| * |1| = | 5|
-  // |4 5|   |2|   |14|
-  // |7 8|         |23|
-  rsArrayTools::fillWithValue(y, 3, -1.0);
-  rsMatrixTools::matrixVectorMultiply(pA, x, y, 3, 2);
-  testResult &= y[0] == 5;
-  testResult &= y[1] == 14;
-  testResult &= y[2] == 23;
-
-  // transposed 2x3-matrix times 2-vector:
-  // |1 2 3|^T * |1| = |1 4| * |1| = | 9|
-  // |4 5 6|     |2|   |2 5|   |2|   |12|
-  //                   |3 6|         |15|
-  rsArrayTools::fillWithValue(y, 3, -1.0);
-  rsMatrixTools::transposedMatrixVectorMultiply(pA, x, y, 2, 3);
-  testResult &= y[0] == 9;
-  testResult &= y[1] == 12;
-  testResult &= y[2] == 15;
-
-  // 2x3-matrix times 3-vector:
-  // |1 2 3| * |1| = |14|
-  // |4 5 6|   |2|   |32|
-  //           |3|
-  rsArrayTools::fillWithValue(y, 3, -1.0);
-  rsMatrixTools::matrixVectorMultiply(pA, x, y, 2, 3);
-  testResult &= y[0] == 14;
-  testResult &= y[1] == 32;
-  testResult &= y[2] == -1;
-
-  // transposed 3x2-matrix times 3-vector:
-  // |1 2|^T * |1| = |1 4 7| * |1| = |30|
-  // |4 5|     |2|   |2 5 8|   |2|   |36|
-  // |7 8|     |3|             |3|
-  rsArrayTools::fillWithValue(y, 3, -1.0);
-  rsMatrixTools::transposedMatrixVectorMultiply(pA, x, y, 3, 2);
-  testResult &= y[0] == 30;
-  testResult &= y[1] == 36;
-  testResult &= y[2] == -1;
-
-  return testResult;
-}
-
-bool testMatrixMultiply3x3()
-{
-  // This function tests only some special cases where P either equals N or M using matrices where
-  // no index-range exceeds 3. It is called from the more general test function
-  // testMatrixMultiply3x3 internally.
-
-  bool testResult = true;
-
-  double A[3][3] = {{1, 2, 3},
-                    {4, 5, 6},
-                    {7, 8, 9}};
-  double B[3][3] = {{9, 8, 7},
-                    {6, 5, 4},
-                    {3, 2, 1}};
-  double C[3][3];
-  double *pA[3], *pB[3], *pC[3];
-  for(int i = 0; i < 3; i++)
-  {
-    pA[i] = &A[i][0];
-    pB[i] = &B[i][0];
-    pC[i] = &C[i][0];
-  }
-
-  // 2x3-matrix times 3x2 matrix (unused fields of result matrix should retain init-value -1):
-  // |1 2 3| * |9 8| = |30 24|
-  // |4 5 6|   |6 5|   |84 69|
-  //           |3 2|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::matrixMultiply(pA, pB, pC, 2, 3, 2);
-  testResult &= C[0][0] == 30 && C[0][1] == 24 && C[0][2] == -1;
-  testResult &= C[1][0] == 84 && C[1][1] == 69 && C[1][2] == -1;
-  testResult &= C[2][0] == -1 && C[2][1] == -1 && C[2][2] == -1;
-
-  // 3x2-matrix times 2x3 matrix:
-  // |1 2| * |9 8 7| = | 21 18 15|
-  // |4 5|   |6 5 4|   | 66 57 48|
-  // |7 8|             |111 96 81|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::matrixMultiply(pA, pB, pC, 3, 2, 3);
-  testResult &= C[0][0] ==  21 && C[0][1] == 18 && C[0][2] == 15;
-  testResult &= C[1][0] ==  66 && C[1][1] == 57 && C[1][2] == 48;
-  testResult &= C[2][0] == 111 && C[2][1] == 96 && C[2][2] == 81;
-
-  // transposed 3x2-matrix times 3x2 matrix:
-  // |1 2|^T * |9 8| = |1 4 7| * |9 8| = |54 42|
-  // |4 5|     |6 5|   |2 5 8|   |6 5|   |72 57|
-  // |7 8|     |3 2|             |3 2|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::matrixMultiplyFirstTransposed(pA, pB, pC, 3, 2, 2);
-  testResult &= C[0][0] == 54 && C[0][1] == 42 && C[0][2] == -1;
-  testResult &= C[1][0] == 72 && C[1][1] == 57 && C[1][2] == -1;
-  testResult &= C[2][0] == -1 && C[2][1] == -1 && C[2][2] == -1;
-
-  // transposed 2x3-matrix times 2x3 matrix:
-  // |1 2 3|^T * |9 8 7| = |1 4| * |9 8 7| = |33 28 23|
-  // |4 5 6|     |6 5 4|   |2 5|   |6 5 4|   |48 41 34|
-  //                       |3 6|             |63 54 45|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::matrixMultiplyFirstTransposed(pA, pB, pC, 2, 3, 3);
-  testResult &= C[0][0] == 33 && C[0][1] == 28 && C[0][2] == 23;
-  testResult &= C[1][0] == 48 && C[1][1] == 41 && C[1][2] == 34;
-  testResult &= C[2][0] == 63 && C[2][1] == 54 && C[2][2] == 45;
-
-  // 2x3-matrix times transposed 2x3 matrix:
-  // |1 2 3| * |9 8 7|^T = |1 2 3| * |9 6| = | 46 28|
-  // |4 5 6|   |6 5 4|     |4 5 6|   |8 5|   |118 73|
-  //                                 |7 4|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::matrixMultiplySecondTransposed(pA, pB, pC, 2, 3, 2);
-  testResult &= C[0][0] ==  46 && C[0][1] == 28 && C[0][2] == -1;
-  testResult &= C[1][0] == 118 && C[1][1] == 73 && C[1][2] == -1;
-  testResult &= C[2][0] ==  -1 && C[2][1] == -1 && C[2][2] == -1;
-
-  // 3x2-matrix times transposed 3x2 matrix:
-  // |1 2| * |9 8|^T = |1 2| * |9 6 3| = | 25 16  7|
-  // |4 5|   |6 5|     |4 5|   |8 5 2|   | 76 49 22|
-  // |7 8|   |3 2|     |7 8|             |127 82 37|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::matrixMultiplySecondTransposed(pA, pB, pC, 3, 2, 3);
-  testResult &= C[0][0] ==  25 && C[0][1] == 16 && C[0][2] ==  7;
-  testResult &= C[1][0] ==  76 && C[1][1] == 49 && C[1][2] == 22;
-  testResult &= C[2][0] == 127 && C[2][1] == 82 && C[2][2] == 37;
-
-  // transposed 2x3-matrix times transposed 3x2 matrix:
-  // |1 2 3|^T * |9 8|^T = |1 4| * |9 6 3| = |41 26 11|
-  // |4 5 6|     |6 5|     |2 5|   |8 5 2|   |58 37 16|
-  //             |3 2|     |3 6|             |75 48 21|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::matrixMultiplyBothTransposed(pA, pB, pC, 2, 3, 3);
-  testResult &= C[0][0] == 41 && C[0][1] == 26 && C[0][2] == 11;
-  testResult &= C[1][0] == 58 && C[1][1] == 37 && C[1][2] == 16;
-  testResult &= C[2][0] == 75 && C[2][1] == 48 && C[2][2] == 21;
-
-  // transposed 3x2-matrix times transposed 2x3 matrix:
-  // |1 2|^T * |9 8 7|^T = |1 4 7| * |9 6| = | 90 54|
-  // |4 5|     |6 5 4|     |2 5 8|   |8 5|   |114 69|
-  // |7 8|                           |7 4|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::matrixMultiplyBothTransposed(pA, pB, pC, 3, 2, 2);
-  testResult &= C[0][0] ==  90 && C[0][1] == 54 && C[0][2] == -1;
-  testResult &= C[1][0] == 114 && C[1][1] == 69 && C[1][2] == -1;
-  testResult &= C[2][0] ==  -1 && C[2][1] == -1 && C[2][2] == -1;
-
-  // 3x3-matrix times 3x3-matrix in place multiplication:
-  // |1 2 3| * |9 8 7| = | 30  24 18|
-  // |4 5 6|   |6 5 4|   | 84  69 54|
-  // |7 8 9|   |3 2 1|   |138 114 90|
-  rsMatrixTools::copyMatrix(pA, pC, 3, 3);
-  rsMatrixTools::matrixInPlaceMultiply(pC, pB, 3, 3);
-  testResult &= C[0][0] ==  30 && C[0][1] ==  24 && C[0][2] == 18;
-  testResult &= C[1][0] ==  84 && C[1][1] ==  69 && C[1][2] == 54;
-  testResult &= C[2][0] == 138 && C[2][1] == 114 && C[2][2] == 90;
-
-  // 2x3-matrix times 3x3-matrix in place multiplication:
-  // |1 2 3| * |9 8 7| = | 30  24 18|
-  // |4 5 6|   |6 5 4|   | 84  69 54|
-  //           |3 2 1|
-  rsMatrixTools::initMatrix(pC, 3, 3, -1.0);
-  rsMatrixTools::copyMatrix(pA, pC, 2, 3);
-  rsMatrixTools::matrixInPlaceMultiply(pC, pB, 2, 3);
-  testResult &= C[0][0] ==  30 && C[0][1] ==  24 && C[0][2] == 18;
-  testResult &= C[1][0] ==  84 && C[1][1] ==  69 && C[1][2] == 54;
-  testResult &= C[2][0] ==  -1 && C[2][1] == -1 && C[2][2] == -1;
-
-  return testResult;
-}
-
-bool testMatrixMultiply()
-{
-  std::string testName = "MatrixMultiply";
-  bool testResult = testMatrixMultiply3x3();
-
-  double A[4][4] = {{  2,   3,   5,   7},
-                    { 11,  13,  17,  19},
-                    { 23,  29,  31,  37},
-                    { 41,  43,  47,  53}};
-  double B[4][4] = {{ 59,  61,  67,  71},
-                    { 73,  79,  83,  89},
-                    { 97, 101, 103, 107},
-                    {109, 113, 127, 131}};
-  double C[4][4];
-  double *pA[4], *pB[4], *pC[4];
-  for(int i = 0; i < 4; i++)
-  {
-    pA[i] = &A[i][0];
-    pB[i] = &B[i][0];
-    pC[i] = &C[i][0];
-  }
-
-  // 2x3 matrix times 3x4 matrix:
-  // | 2  3  5| * |59  61  67  71| = | 822  864  898  944|
-  // |11 13 17|   |73  79  83  89|   |3247 3415 3567 3757|
-  //              |97 101 103 107|
-  rsMatrixTools::initMatrix(pC, 4, 4, -1.0);
-  rsMatrixTools::matrixMultiply(pA, pB, pC, 2, 3, 4);
-  testResult &= C[0][0] ==  822 && C[0][1] ==  864 && C[0][2] ==  898 && C[0][3] ==  944;
-  testResult &= C[1][0] == 3247 && C[1][1] == 3415 && C[1][2] == 3567 && C[1][3] == 3757;
-  testResult &= C[2][0] ==   -1 && C[2][1] ==   -1 && C[2][2] ==   -1 && C[2][3] ==   -1;
-  testResult &= C[3][0] ==   -1 && C[3][1] ==   -1 && C[3][2] ==   -1 && C[3][3] ==   -1;
-
-  // 2x3 matrix times transposed 3x4 matrix:
-  // | 2  3  5| * | 59  61  67|^T = | 636  798 1012 1192|
-  // |11 13 17|   | 73  79  83|     |2581 3241 4131 4827|
-  //              | 97 101 103|
-  //              |109 113 127|
-  rsMatrixTools::initMatrix(pC, 4, 4, -1.0);
-  rsMatrixTools::matrixMultiplySecondTransposed(pA, pB, pC, 2, 3, 4);
-  testResult &= C[0][0] ==  636 && C[0][1] ==  798 && C[0][2] == 1012 && C[0][3] == 1192;
-  testResult &= C[1][0] == 2581 && C[1][1] == 3241 && C[1][2] == 4131 && C[1][3] == 4827;
-  testResult &= C[2][0] ==   -1 && C[2][1] ==   -1 && C[2][2] ==   -1 && C[2][3] ==   -1;
-  testResult &= C[3][0] ==   -1 && C[3][1] ==   -1 && C[3][2] ==   -1 && C[3][3] ==   -1;
-
-  // transposed 3x2 matrix times 3x4 matrix:
-  // | 2  3|^T * |59  61  67  71| = |3152 3314 3416 3582|
-  // |11 13|     |73  79  83  89|   |3939 4139 4267 4473|
-  // |23 29|     |97 101 103 107|
-  rsMatrixTools::initMatrix(pC, 4, 4, -1.0);
-  rsMatrixTools::matrixMultiplyFirstTransposed(pA, pB, pC, 3, 2, 4);
-  testResult &= C[0][0] == 3152 && C[0][1] == 3314 && C[0][2] == 3416 && C[0][3] == 3582;
-  testResult &= C[1][0] == 3939 && C[1][1] == 4139 && C[1][2] == 4267 && C[1][3] == 4473;
-  testResult &= C[2][0] ==   -1 && C[2][1] ==   -1 && C[2][2] ==   -1 && C[2][3] ==   -1;
-  testResult &= C[3][0] ==   -1 && C[3][1] ==   -1 && C[3][2] ==   -1 && C[3][3] ==   -1;
-
-  // transposed 3x2 matrix times transposed 4x3 matrix:
-  // | 2  3|^T * | 59  61  67|^T = |2330 2924 3647 4382|
-  // |11 13|     | 73  79  83|     |2913 3653 4691 5479|
-  // |23 29|     | 97 101 103|
-  //             |109 113 127|
-  rsMatrixTools::initMatrix(pC, 4, 4, -1.0);
-  rsMatrixTools::matrixMultiplyBothTransposed(pA, pB, pC, 3, 2, 4);
-  testResult &= C[0][0] == 2330 && C[0][1] == 2924 && C[0][2] == 3674 && C[0][3] == 4382;
-  testResult &= C[1][0] == 2913 && C[1][1] == 3653 && C[1][2] == 4591 && C[1][3] == 5479;
-  testResult &= C[2][0] ==   -1 && C[2][1] ==   -1 && C[2][2] ==   -1 && C[2][3] ==   -1;
-  testResult &= C[3][0] ==   -1 && C[3][1] ==   -1 && C[3][2] ==   -1 && C[3][3] ==   -1;
-
-  return testResult;
-}
 
 bool testChangeOfBasis()
 {
@@ -777,6 +467,9 @@ bool testNullSpace()
   return r;
 }
 
+//=================================================================================================
+// New flat array based solvers:
+
 // tests the new implementation
 bool testLinearSystemViaGauss2()
 {
@@ -828,8 +521,6 @@ bool testLinearSystemViaGauss2()
   // test behavior of makeTriangular in case of singular matrices
 
 
-
-
   // figure out, when it can be used in place, i.e. X == B
 
   return r;
@@ -837,25 +528,230 @@ bool testLinearSystemViaGauss2()
 
 
 
-//bool testLinearAlgebra(std::string &reportString)
+bool testIterativeLinAlgBasics()
+{
+  bool ok = true;
+
+  using Real = double;
+  //using Mat  = rsMatrix<Real>;
+  using Vec  = std::vector<Real>;
+  using ILA  = rsIterativeLinearAlgebra;
+  Real tol;
+
+  auto testIsMul = [&](const Vec& x, const Vec& y, bool desiredResult, Real desiredRatio)
+  {
+    rsAssert(x.size() == y.size());
+    int N = (int) x.size();
+    Real ratio;
+    bool result = ILA::isScalarMultiple(&x[0], &y[0], N, tol, &ratio);
+    bool ok = result == desiredResult && ratio == desiredRatio;
+    result = ILA::isScalarMultiple(&y[0], &x[0], N, tol, &ratio); // x,y swapped
+    ok &= result == desiredResult;                                // result should be the same
+    if(result == true) ok &= ratio == 1.0/desiredRatio;           // ratio should be reciprocal
+    return ok;
+  };
+  tol = 0.0;
+  ok &= testIsMul(Vec({1,2,3,4}), Vec({2,4,6,8}), true,  2.0);
+  ok &= testIsMul(Vec({0,2,3,4}), Vec({0,4,6,8}), true,  2.0);
+  ok &= testIsMul(Vec({0,0,3,4}), Vec({0,0,6,8}), true,  2.0);
+  ok &= testIsMul(Vec({0,0,0,4}), Vec({0,0,0,8}), true,  2.0);
+  ok &= testIsMul(Vec({0,2,0,4}), Vec({0,4,0,8}), true,  2.0);
+  ok &= testIsMul(Vec({0,2,3,0}), Vec({0,4,6,0}), true,  2.0);
+  ok &= testIsMul(Vec({1,2,0,0}), Vec({2,4,0,0}), true,  2.0);
+  ok &= testIsMul(Vec({1,0,0,0}), Vec({2,0,0,0}), true,  2.0);
+  ok &= testIsMul(Vec({0,2,0,0}), Vec({0,4,0,0}), true,  2.0);
+
+  ok &= testIsMul(Vec({0,0,0,0}), Vec({0,0,0,0}), false, 0.0);
+  ok &= testIsMul(Vec({0,0,3,4}), Vec({0,4,6,8}), false, 0.0);
+  ok &= testIsMul(Vec({0,2,3,4}), Vec({0,0,6,8}), false, 0.0);
+  ok &= testIsMul(Vec({1,2,0,4}), Vec({2,4,6,8}), false, 0.0);
+  ok &= testIsMul(Vec({1,2,3,4}), Vec({2,4,0,8}), false, 0.0);
+
+  // Test with some nonzero tolerance:
+  tol = 0.2;
+  ok &= testIsMul(Vec({1.0,2.0,3.0,4.0}), Vec({2.0,3.9,6.1,8.0}), true, 2.0);
+
+  return ok;
+}
+
+bool testIterativeLinearSolvers()
+{
+  bool ok = true;
+
+  using Real = double;
+  using Mat  = rsMatrix<Real>;
+  using Vec  = std::vector<Real>;
+  using ILA  = rsIterativeLinearAlgebra;
+  using AT   = rsArrayTools;
+
+  int N = 3;
+  Mat A(3, 3, {5,-1,2, -1,7,3, 2,3,6}); // is symmetric and positive definite (SPD) (verify!)
+  Vec x({1,2,3});
+  Vec b = A*x;
+  Vec x2(N);
+  int its = rsSolveCG(A, x2, b, 1.e-12, 100);
+  ok &= rsIsCloseTo(x, x2, 1.e-12);
+
+  rsFill(x2, 0.0);
+  its = rsSolveRichardson(A, x2, b, 0.16, 1.e-13, 100); // around 0.16 seems best
+  Real err = rsMaxDeviation(x2, x);
+
+
+  return ok;
+}
+
+// todo: 
+// -move the iterative solvers that are currently in rsSparseMatrix (solveGaussSeidel, solveSOR, 
+//  etc.) into rsIterativeLinearAlgebra
+// -drag over testSparseMatrixSolvers from MatrixUnitTests.cpp, rename to testIterativeSolvers
+
+bool testPowerIterationDense()
+{
+  bool ok = true;
+
+  using Real = double;
+  using Mat  = rsMatrix<Real>;
+  using Vec  = std::vector<Real>;
+  using ILA  = rsIterativeLinearAlgebra;
+  using AT   = rsArrayTools;
+
+  // Create 3x3 matrix with eigenvalues -1,2,3 and eigenvectors (1,-2,2),(2,-5,3),(3,6,3):
+  int N = 3;                             // dimensionality
+  Vec vals({  -1,       2,      3  });   // eigenvalues
+  Vec vecs({1,-2,2,  2,-5,3,  3,6,3});   // eigenvectors
+  Mat A = fromEigenSystem(vals, vecs);   // A = matrix with desired eigensystem
+
+  // Recover the largest eigenvalue and its eigenvector via power iteration:
+  int its;
+  Real tol = 1.e-13;
+  Real val;
+  Vec vec(N), wrk(N);
+  vec = rsRandomVector(N, 0, 1);
+  its = ILA::largestEigenValueAndVector(A, &val, &vec[0], tol, &wrk[0]);
+  // yep, works: val == 3 and vec == (3,6,3)/sqrt(54) 
+  // todo: add automatic check, test with negative largest eigenvalue - it wil probably fail 
+  // because we need to swicth the convergence test to using isScalarMultiple as in eigenspace
+
+
+  // move this code into the experiments section (partially done - see orthogonalizedPowerIteration
+  // in MathExperiments.cpp):
+
+  // Recover all eigenvalues and vectors:
+  rsNormalizeChunks(vecs, N);  // for easier comparison
+  Vec vals2(N), vecs2(N*N);
+  AT::fillWithRandomValues(&vecs2[0], N*N, -1.0, +1.0, 0);  // initial guess
+  its = ILA::eigenspace(A, &vals2[0], &vecs2[0], tol, &wrk[0]);
+  Vec vec2 = rsGetChunk(vecs2, N, N);
+  Vec tmp1 = A*vec2;         // matrix times vector
+  Vec tmp2 = vals2[1]*vec2;  // scalar times vector
+  rsNormalizeChunks(vecs2, N);  // should not change anything, vecs 2 is already normalized
+  tol = 1.e-7;
+  Mat E = rsToMatrixColumnWise(vecs2, N, N);
+  //bool ortho = areColumnsOrthogonal(E);
+  //ok &= checkEigensystem(vals2, vecs2, vals, vecs, tol);
+  // the 1st eigenvector matches but the other 2 do not - but all eigenvalues are correct, so the
+  // iteration actuall must have converged to the right eigenvalue. but maybe we have some issue
+  // with some projections being subtracted or not before leaving the function?
+  // yep: we copy wrk int vec before leaving and wrk has the projections removed ..but that's
+  // actually right, isnt it?
+
+  // try it with a simpler problem: 2D, eigenvectors (1,1),(1,-1)
+  N = 2;
+  vals = Vec({  2,     1});   // eigenvalues
+  vecs = Vec({1,1,  1,-1});   // eigenvectors
+  A = fromEigenSystem(vals, vecs);
+  vals2.resize(N);
+  vecs2.resize(N*N);
+  its = ILA::eigenspace(A, &vals2[0], &vecs2[0], 1.e-13, &wrk[0]);
+  ok &= checkEigensystem(vals2, vecs2, vals, vecs, 1.e-13);
+  // 2D works with (1,(1,1)),(3,(1,-1)) but not with (1,(1,2)),(3,(1,-1))
+  // I think, it works only when the eigenvectors are orthogonal. If they are not we probably can't
+  // just project by inner products. it may nevertheless work with the eigenvalues because we 
+  // subtract some portion in the directions of the already foun eigenvectors - but not everything?
+
+  vals = Vec({  3,    1});  // eigenvalues
+  vecs = Vec({6,8, -8,6});  // is also orthogonal, both have norm 100
+  A = fromEigenSystem(vals, vecs);
+  its = ILA::eigenspace(A, &vals2[0], &vecs2[0], 1.e-13, &wrk[0]);
+  ok &= checkEigensystem(vals2, vecs2, vals, vecs, 1.e-12);
+
+  vecs = Vec({6,8, 8,6});  // not orthogonal, both have norm 100
+  A = fromEigenSystem(vals, vecs);
+  its = ILA::eigenspace(A, &vals2[0], &vecs2[0], 1.e-13, &wrk[0]);
+  //ok &= checkEigensystem(vals2, vecs2, vals, vecs, 1.e-12);
+  Vec w1 = rsGetChunk(vecs2, 0, N);  // extract both found vectors
+  Vec w2 = rsGetChunk(vecs2, N, N);
+  Vec w3 = w2-w1;
+  Vec w4 = w2+w1;
+  Vec w5 = vals2[0]*w1 - vals2[1]*w2;
+  Vec w6 = vals2[0]*w1 + vals2[1]*w2;
+
+  // maybe we can rapair it by adding the subtracted projections back after convergence? or maybe
+  // twice them? or maybe the vectors converge to an orthogonalized eigensystem and we somehow need
+  // to deorthogonalize it as postprocessing step?
+
+  // BUT: even if the algo only produces the eigenvalues and incorrect eigenvectors, it may still
+  // be useful
+
+
+  // hangs because one of eigenvalues is negative which flips the sign of the iterates in each
+  // iteration and the convergence test can't deal with that. i think, we must drag the 
+  //   int i = AT::maxAbsIndex(vec, N);
+  //   if(vec[i] * wrk[i] < T(0)) 
+  // out of the
+  //   if(dMax <= tol)
+  // condition and if the test returns true, we must compute not compute the maxDeviation but the
+  // max-abs of the sum...or just negate the vec or the wrk and set a flag that the eigenvalue is
+  // negative which will then be used instead of the if(vec[i] * wrk[i] < T(0)) inside the if(dMax
+  // ...or: to make it suitable for complex numbers, we should really have a function:
+  //   bool isScalarMultiple(const T* x, const T* y, int N, T tol, T* factor)
+  // that can be used for the convergence test *and* at the same time compute the eigenvalue. It
+  // should compute all the ratios y[i]/x[i]. If they all give the same value (up to tolerance), 
+  // that ratio is the scale factor (eigenvalue). some care needs to be taken, if x[i] is zero
+  // -> done
+  // -i think, the same applies to largestEigenValueAndVector
+
+  // todo: 
+  // -figure out what happens when we have eigenvalues with multiplicities (algebraic and/or
+  //  geometric)
+
+  // Deflation for symmetric matrices works by subtracting sum_i (lamda_i * V_i * V_i^T)
+  // https://www.math.tamu.edu/~dallen/linear_algebra/chpt6.pdf  pg 417
+
+  return ok;
+}
+
+
+
+
+
+
 bool testLinearAlgebra()
 {
   std::string reportString = "LinearAlgebra"; // dummy-string - delete later
-  bool testResult = true;
+  bool ok = true;
 
-  //testResult &= testBandDiagonalSolver();  // fails with gcc
-  testResult &= testMatrix2x2();
-  testResult &= testLinearSystem2x2();
-  testResult &= testLinearSystem3x3();
-  testResult &= testLinearSystemViaGauss();
-  testResult &= testGaussJordanInversion();
-  testResult &= testTridiagonalSystem();
-  testResult &= testSquareMatrixTranspose();
-  testResult &= testMatrixVectorMultiply();
-  testResult &= testMatrixMultiply();
-  testResult &= testChangeOfBasis();
-  testResult &= testNullSpace();
-  testResult &= testLinearSystemViaGauss2();
+  // LAPACK based solvers:
+  //ok &= testBandDiagonalSolver();  // fails with gcc
 
-  return testResult;
+  // Old (2D array based) solvers:
+  ok &= testMatrix2x2();
+  ok &= testLinearSystem2x2();
+  ok &= testLinearSystem3x3();
+  ok &= testLinearSystemViaGauss();
+  ok &= testGaussJordanInversion();
+  ok &= testTridiagonalSystem();
+  ok &= testChangeOfBasis();
+
+  // New (flat array based) direct solvers:
+  ok &= testNullSpace();
+  ok &= testLinearSystemViaGauss2();
+
+  // Iterative linear algebra:
+  ok &= testIterativeLinAlgBasics();
+  ok &= testIterativeLinearSolvers();
+  ok &= testPowerIterationDense();
+
+
+  return ok;
 }

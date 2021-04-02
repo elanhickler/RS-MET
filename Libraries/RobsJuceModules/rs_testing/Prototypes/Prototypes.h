@@ -1780,19 +1780,27 @@ computing matrix-vector or matrix-matrix products. These low-level special purpo
 (one for each special matrix class) will then be used inside the actual computational algorithms 
 which themselves will be the same for all the different matrix classes. If you want to use the 
 algorithms for some new special matrix class, you will need to add just a small amount of 
-boilerplate code for these operations - either here in the class or as global functions. */
+boilerplate code for these operations - either as static member functions here in the class (if 
+you are me) or as free functions (if you are a client and don't want to hack my library). */
 
 class rsIterativeLinearAlgebra
 {
 
 public:
 
+
+
+  //-----------------------------------------------------------------------------------------------
+  // \name Low Level Interface
+
   template<class T, class TMat>
   static int largestEigenValueAndVector(const TMat& A, T* val, T* vec, T tol, T* workspace);
   // maybe rename to vonMisesIteration or eigenViaVonMises/eigenViaPowerIteration
+  // largestEigenpair
 
   template<class T, class TMat>
   static int eigenspace(const TMat& A, T* vals, T* vecs, T tol, T* workspace);
+  // rename to eigenViaPower or eigensystemViaEPI (extended power iteration)
   // each eigenvector is found in turn from the largest to the smallest via a variation of the von 
   // Mises iteration in which the projection of the iterates onto the already found eigenspace is
   // subtracted from the iterates
@@ -1800,17 +1808,45 @@ public:
   // that took the most iterations...hmm - or maybe it should return the sum of all iterations
   // -maybe it should take an additional parameter to specify, how many eigenpairs should be found
   //  and also a maximum number of iterations
+  // mayb rename to eigensystem
+  // https://reference.wolfram.com/language/ref/Eigensystem.html
+  // sizes: A: NxN, vals: N, vecs: N*N, workspace: N
 
 
-  // Specializations of some low-level functions for sparse matrices (boilerplate):
-  template<class T> static void product(const rsSparseMatrix<T>& A, const T* x, T* y) { A.product(x, y); }
-  template<class T> static int numRows(const rsSparseMatrix<T>& A) { return A.getNumRows(); }
-  template<class T> static int numColumns(const rsSparseMatrix<T>& A) { return A.getNumColumns(); }
+
+  /** Returns true, iff the vector y is a scalar multiple of the vector x (up to some tolerance). 
+  Both vectors must be of length N. The "factor" parameter will get the scale factor assigned if y
+  is indeed a multiple of x or 0, if not. I deliberately chose 0 and not nan for this case for two
+  reasons: (1) the function should be able to work with number types T that have no concept of nan 
+  (fractions, modular integers, etc. (2) the function is mainly intended for dealing with 
+  eigenvectors and they are defined to be nonzero, so y cannot be 0*x and still count as 
+  eigenvector, so the zero is actually "free" and can be used to encode that condition. */
+  template<class T>
+  static bool isScalarMultiple(const T* x, const T* y, int N, T tol, T* factor);
+  // todo: (decide and) document if tolerance is absolute or relative, maybe rename to tolR, if
+  // relative
+  // maybe rename to rsIsMultiple move into rsArrayTools (and maybe have an alias isScalarMultiple
+  // here)
+
 
   // todo: implement:
   // https://en.wikipedia.org/wiki/Conjugate_gradient_method
   // https://en.wikipedia.org/wiki/Biconjugate_gradient_method
   // https://en.wikipedia.org/wiki/Biconjugate_gradient_stabilized_method
+
+protected:
+
+  // Specializations of some low-level functions (this is boilerplate):
+
+  // Specializations for rsMatrix:
+  template<class T> static void product(const rsMatrix<T>& A, const T* x, T* y) { A.product(x, y); }
+  template<class T> static int numRows(const rsMatrix<T>& A) { return A.getNumRows(); }
+  template<class T> static int numColumns(const rsMatrix<T>& A) { return A.getNumColumns(); }
+
+  // Specializations for rsSparseMatrix:
+  template<class T> static void product(const rsSparseMatrix<T>& A, const T* x, T* y) { A.product(x, y); }
+  template<class T> static int numRows(const rsSparseMatrix<T>& A) { return A.getNumRows(); }
+  template<class T> static int numColumns(const rsSparseMatrix<T>& A) { return A.getNumColumns(); }
 
 };
 
@@ -1877,47 +1913,191 @@ int rsIterativeLinearAlgebra::eigenspace(const TMat& A, T* vals, T* vecs, T tol,
 
   int N = numRows(A);
   int numIts = 0;
-  for(int n = 0; n < N; n++) {        // loop over the eigenvectors
-    T* val = &vals[n];                // location of n-th eigenvalue
-    T* vec = &vecs[n*N];              // start location of n-th eigenvector
-    //T L = AT::euclideanNorm(vec, N);
-    T L = norm(vec, N);
-    AT::scale(vec, N, T(1) / L);
+  for(int n = 0; n < N; n++) {         // loop over the eigenvectors
+    T* val = &vals[n];                 // location of n-th eigenvalue
+    T* vec = &vecs[n*N];               // start location of n-th eigenvector
     while(true) {
+      numIts++; 
       product(A, vec, wrk);
       for(int i = 0; i < n; i++) {
         T pi = T(0);
-        for(int j = 0; j < N; j++) pi += wrk[j] * vecs[i*N + j];   // compute projection coeff
-        for(int j = 0; j < N; j++) wrk[j] -= pi * vecs[i*N + j]; } // subtract projection
-      //L = AT::euclideanNorm(wrk, N);
-      L = norm(wrk, N);
-      AT::scale(wrk, N, T(1) / L);
-      T dMax = AT::maxDeviation(vec, wrk, N);
-      if(dMax <= tol) {
-        *val = L;
-        int i = AT::maxAbsIndex(vec, N);
-        if(vec[i] * wrk[i] < T(0)) 
-          *val = -(*val);
-        AT::copy(wrk, vec, N);
-        break; }
+        for(int j = 0; j < N; j++) 
+          pi += wrk[j] * vecs[i*N + j];   // compute projection coeff
+        for(int j = 0; j < N; j++) 
+          wrk[j] -= pi * vecs[i*N + j]; } // subtract projection
+      bool done = isScalarMultiple(vec, wrk, N, tol, val);
+      T L = norm(wrk, N);
+      AT::scale(wrk, N, T(1) / L);        // what if L == 0?
       AT::copy(wrk, vec, N);
-      numIts++; }}
+      if(done)
+        break;
+    }
+  }
   return numIts;
+
+  // todo: drag the T L = norm(vec, N); AT::scale(vec, N, T(1) / L); into the iteration before
+  // forming the product, remove them after the convergence test
+  // 
 }
 // -maybe get rid of the function that that computes only the largest - give this function another
 //  parameter that determines, how many eigenvalues should be computed, and if it's 1, it just 
 //  reduces to the function that computes the largest.
 // -maybe have a boolean parameter to switch between finding eigenspace of A or A^-1 - in the 2nd
 //  case, we may have to use solve(A, vec, wrk) or solve(A, wrk, vec) instead of 
-//  product(A, vec, wrk) ...maybe we could also finde eigenvalues of A^T, A^-T
-// -maybe try to improve convergence by using a matrix with suitably shifted eigenvalues, the 
+//  product(A, vec, wrk) ...maybe we could also find eigenvalues of A^T, A^-T
+// -Maybe try to improve convergence by using a matrix with suitably shifted eigenvalues. The 
 //  shift should be such as to maximize the ratio between the largest and second-to-largest 
-//  (remaining, absolute) eigenvalue. maybe the trace could help: it's the sum of all eigenvalues,
-//  divide by N to get the average and subtract that average to center the eigenvalues around zero.
-//  ...but for the 2nd eigenpair, we want to center the *remaining* eigenvalues around zero - maybe 
-//  subtract all the already found eigenvalues from the trace before dividing by N -> experiments
-//  needed. ..the determinant is the product of all eigenvalues btw - but i don't think that's 
-//  helpful here (it's hard to compute anyway)
+//  (remaining, absolute) eigenvalue. Maybe the trace could help: it's the sum of all eigenvalues, 
+//  so we may divide by N to get the average and subtract that average to center the eigenvalues 
+//  around zero. But for the 2nd eigenpair, we want to center the *remaining* eigenvalues around 
+//  zero. Maybe subtract all the already found eigenvalues from the trace before dividing by N 
+//  -> experiments needed. ...the determinant is the product of all eigenvalues btw - but i don't 
+//  think that's helpful here (it's hard to compute anyway). For example, if we have a matrix with
+//  eigenvalues 1,2,3, the convergence speed will be given by |3|/|2| = 1.5. That's the factor by 
+//  which the contribution of the 3rd eigenvector grows faster than that of the 2nd. If we shift 
+//  by -1, the shifted eigenvalues are 0,1,2 and the convergence speed will be |2|/|1| = 2 which is
+//  better. But we don't know the ratio of largest to second largest which (i think) is needed to 
+//  make an informed shift. Maybe we could estimate it in each iteration by computing in each 
+//  iteration 2 vectors: one as usual and one with the projection onto the usual vector subtracted,
+//  which is going to be our estimate for the 2nd largest eigenvector ...dunno, just brainstorming
+
+template<class T>
+bool rsIterativeLinearAlgebra::isScalarMultiple(const T* x, const T* y, int N, T tol, T* factor)
+{
+  *factor = T(0);
+
+  // Skip initial section of zeros:
+  auto isZero = [&](const T& number) { return rsAbs(number) <= tol; };
+  int i = 0;
+  while(isZero(x[i]) && isZero(y[i]))  
+    i++;
+  if(i == N || isZero(x[i]) || isZero(y[i])) 
+    return false;
+    // either both x and y are all zeros or we found an i for which x[i] is zero but y[i] is 
+    // nonzero or vice versa
+
+  // If we reach this point, we have found an index i for which both x[i] and y[i] are nonzero. We 
+  // compute their ratio, defined by r := y[i] / x[i] such that y[i] = r * x[i]:
+  T r = y[i] / x[i];
+
+  // Now we iterate through the remaining array and check for each pair x[i], y[i], if they either
+  // obey the same ratio or are both zero:
+  i++;
+  while(i < N) {
+    // Check, if the ratio of x[i] and y[i] matches r unless both are zero:
+    if(!(isZero(x[i]) && isZero(y[i]))) {
+      T yt = r  * x[i];     // expected target value for y
+      T d  = yt - y[i];     // difference between target and actual
+      if(rsAbs(d) > tol)
+        return false;    }  // the ratio of x[i] and y[i] did not match r
+    i++; }
+
+  // If we reach this point, y is indeed a scalar multiple of x and the scale factor is r:
+  *factor = r;
+  return true;
+}
+
+
+template<class T>
+T rsDot(const std::vector<T>& x, const std::vector<T>& y)
+{
+  rsAssert(x.size() == y.size());
+  T sum = T(0);
+  for(size_t i = 0; i < x.size(); i++)
+    sum += x[i] * y[i];
+  return sum;
+}
+// move elsewhere
+
+
+/** Returns true, iff for all values x[i] in the x-array, adding s*dx[i] does not actually change 
+the x[i] value. Useful for multidimensional convergence tests. */
+template<class T>
+bool rsStaysFixed(const T* x, const T* dx, int N, T s = T(1))
+{
+  for(int n = 0; n < N; n++) {
+    T y = x[n] + s*dx[n];
+    if(y != x[n])
+      return false; }
+  return true;
+}
+// todo: give it a tolerance. maybe that should be relative
+
+template<class T>
+bool rsStaysFixed(const std::vector<T>& x, const std::vector<T>& dx, T s = T(1))
+{
+  rsAssert(x.size() == dx.size());
+  return rsStaysFixed(&x[0], &dx[0], (int)x.size(), s);
+}
+
+
+/** Solves the linear system A*x = b iteratively via the conjugate gradient method. The matrix A 
+must be symmetric and positive definite (i think). */
+template<class T>
+int rsSolveCG(const rsMatrix<T>& A, std::vector<T>& x, const std::vector<T>& b, T tol, int maxIts)
+{
+  using Vec = std::vector<T>;
+  Vec r = b - A*x;
+  Vec p = r;
+  T rho0 = rsDot(b, b);
+  T rho  = rsDot(r, r);
+  Vec t;
+  T a, rhos;
+  for(int k = 0; k < maxIts; k++)
+  {
+    if(sqrt(rho/rho0) <= tol)
+      return k;                
+    // ToDo: we need a better stopping criterion. Maybe something based on 
+    // rsStaysFixed(x, p, a, tol) ...
+
+    t    = A*p;
+    a    = rho / rsDot(p,t);
+    x    = x + a*p;
+    r    = r - a*t;
+    rhos = rho;
+    rho  = rsDot(r, r);
+    p    = r + (rho/rhos)*p;
+  }
+  return maxIts+1;
+}
+// References: Numerical Linear Algebra and Matrix Factorizations (Tom Lyche), pg 286
+
+template<class T>
+int rsSolveRichardson(const rsMatrix<T>& A, std::vector<T>& x, const std::vector<T>& b, T alpha,
+  T tol, int maxIts)
+{
+  int its = 0;
+  std::vector<T> dx;
+  while(its < maxIts)
+  {
+    dx = alpha * (b - A*x);
+    if(rsStaysFixed(x, dx)) 
+      return its;               // x has converged
+    x = x + dx;
+    its++;
+  }
+  return its;
+}
+// References: Numerical Linear Algebra and Matrix Factorizations (Tom Lyche), pg 261
+// -convergence test needs tolerance
+// -if A has positive eigenvalues s1 >= s2 >= sN > 0, the method converges, iff 0 < alpha < 2/s1.
+// -The iteration can also be expressed as xNew = (I-alpha*A)*xOld + b. Define kappa = s1/sN, 
+//  alpha_0 = 2 / (s1 + sN), then we have:
+//    rho(I-alpha*A) > rho(I-alpha_0*A) = (kappa-1)/(kappa+1). 
+//  where rho is the spectral radius (i guess)
+// -I think, this algorithm corresponds to gradient descent algorithm in numerical optimization. 
+//  Starting from that as the baseline, we can try various tweaks to try to improve the 
+//  convergence speed and robustness, such as:
+//  -select update rate alpha per iteration (...somehow)
+//  -use momentum
+//  -use an alpha vector, i.e. an update rate per coordinate, possibly adaptive
+//  -use (adaptive) momentum per coordinate
+//  -maybe we could detect if the update vector alternates sign between the iterations for a given
+//   coordinate, and if so, increase the momentum and/or decrease update rate for that coordinate
+//   ...and decrease/increase it, if it doesn't alternate?
+//  -detect, if the error err = b - A*x has increased with respect to previous iteration, if so,
+//   maybe undo the step and also adapt momentum and update rate
+
 
 //=================================================================================================
 
